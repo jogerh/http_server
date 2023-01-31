@@ -24,11 +24,6 @@ void ADD_KNOWN_HEADER(HTTP_RESPONSE& Response, DWORD HeaderId, PSTR RawValue) {
 //
 // Prototypes.
 //
-DWORD
-DoReceiveRequests(
-	HANDLE hReqQueue,
-	char* wwwAuthVal
-);
 
 DWORD
 SendHttpResponse(
@@ -124,10 +119,12 @@ public:
 	void ReceiveRequests(char* www_auth_val) const
 	{
 		// Loop while receiving requests
-		DoReceiveRequests(m_queue.Get(), www_auth_val);
+		DoReceiveRequests(www_auth_val);
 	}
 
 private:
+
+	DWORD DoReceiveRequests(char* wwwAuthVal ) const;
 	RequestQueueHandle m_queue;
 };
 
@@ -287,11 +284,7 @@ Arguments:
 Return Value:
 	Success/Failure.
 --***************************************************************************/
-DWORD
-DoReceiveRequests(
-	IN HANDLE hReqQueue,
-	IN char* wwwAuthValue
-)
+DWORD RequestQueue::DoReceiveRequests(char* wwwAuthValue ) const
 {
 	ULONG result;
 	HTTP_REQUEST_ID requestId;
@@ -320,7 +313,7 @@ DoReceiveRequests(
 		RtlZeroMemory(pRequest, RequestBufferLength);
 
 		result = HttpReceiveHttpRequest(
-			hReqQueue, // Req Queue
+			m_queue.Get(), // Req Queue
 			requestId, // Req ID
 			0, // Flags
 			pRequest, // HTTP request buffer
@@ -346,7 +339,7 @@ DoReceiveRequests(
 				{
 					wprintf(L"Request is authenticated, sending 200\n");
 					result = SendHttpResponse(
-						hReqQueue,
+						m_queue.Get(),
 						pRequest,
 						200,
 						wwwAuthValue,
@@ -358,7 +351,7 @@ DoReceiveRequests(
 				{
 					wprintf(L"Request is not authenticated, sending 401\n");
 					result = SendHttpResponse(
-						hReqQueue,
+						m_queue.Get(),
 						pRequest,
 						401,
 						nullptr,
@@ -374,7 +367,7 @@ DoReceiveRequests(
 					pRequest->CookedUrl.pFullUrl);
 
 				result = SendHttpResponse(
-					hReqQueue,
+					m_queue.Get(),
 					pRequest,
 					503,
 					nullptr,
