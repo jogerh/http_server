@@ -20,7 +20,7 @@ DWORD RequestQueue::ReceiveRequests(char* wwwAuthValue) const
 	// this if required. We also need space for a HTTP_REQUEST structure.
 	//
 
-	ULONG bufferSize = sizeof(HTTP_REQUEST) + 2048;
+	ULONG bufferSize = sizeof(HTTP_REQUEST);
 	std::vector<CHAR> requestBuffer(bufferSize);
 
 
@@ -30,9 +30,7 @@ DWORD RequestQueue::ReceiveRequests(char* wwwAuthValue) const
 	HTTP_REQUEST_ID requestId;
 	HTTP_SET_NULL_ID(&requestId);
 
-	int i = 0;
-
-	DWORD result;
+	DWORD result{};
 	for (;;)
 	{
 		fill(begin(requestBuffer), end(requestBuffer), 0);
@@ -100,8 +98,6 @@ DWORD RequestQueue::ReceiveRequests(char* wwwAuthValue) const
 			//
 			bufferSize = bytesRead;
 			requestBuffer.resize(bufferSize);
-
-			request = reinterpret_cast<PHTTP_REQUEST>(requestBuffer.data());
 		}
 		else if (ERROR_CONNECTION_INVALID == result && !HTTP_IS_NULL_ID(&requestId))
 		{
