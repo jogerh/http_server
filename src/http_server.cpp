@@ -25,38 +25,36 @@ Return Value:
 --***************************************************************************/
 DWORD RequestQueue::DoReceiveRequests(char* wwwAuthValue) const
 {
-	ULONG result;
-	HTTP_REQUEST_ID requestId;
-	DWORD bytesRead;
-
 	//
 	// Allocate a 2K buffer. Should be good for most requests, we'll grow
 	// this if required. We also need space for a HTTP_REQUEST structure.
 	//
 
-	ULONG RequestBufferLength = sizeof(HTTP_REQUEST) + 2048;
-	std::vector<PCHAR> pRequestBuffer(RequestBufferLength);
+	ULONG bufferSize = sizeof(HTTP_REQUEST) + 2048;
+	std::vector<CHAR> requestBuffer(bufferSize);
 
-	auto pRequest = reinterpret_cast<PHTTP_REQUEST>(pRequestBuffer.data());
+	auto request = reinterpret_cast<PHTTP_REQUEST>(requestBuffer.data());
 
 	//
 	// Wait for a new request -- This is indicated by a NULL request ID.
 	//
-
+	HTTP_REQUEST_ID requestId;
 	HTTP_SET_NULL_ID(&requestId);
 
 	int i = 0;
 
+	DWORD result;
 	for (;;)
 	{
-		RtlZeroMemory(pRequest, RequestBufferLength);
+		fill(begin(requestBuffer), end(requestBuffer), 0);
 
+		DWORD bytesRead{};
 		result = HttpReceiveHttpRequest(
 			m_queue.Get(), // Req Queue
 			requestId, // Req ID
 			0, // Flags
-			pRequest, // HTTP request buffer
-			RequestBufferLength, // req buffer length
+			request, // HTTP request buffer
+			bufferSize, // req buffer length
 			&bytesRead, // bytes received
 			nullptr // LPOVERLAPPED
 		);
@@ -66,19 +64,19 @@ DWORD RequestQueue::DoReceiveRequests(char* wwwAuthValue) const
 			//
 			// Worked!
 			//
-			switch (pRequest->Verb)
+			switch (request->Verb)
 			{
 			case HttpVerbGET:
-				wprintf(L"Got a GET request for %ws \n", pRequest->CookedUrl.pFullUrl);
+				wprintf(L"Got a GET request for %ws \n", request->CookedUrl.pFullUrl);
 
-				if (pRequest->pRequestInfo &&
-					pRequest->pRequestInfo->InfoType == HttpRequestInfoTypeAuth &&
-					static_cast<HTTP_REQUEST_AUTH_INFO*>(pRequest->pRequestInfo->pInfo)->AuthStatus ==
+				if (request->pRequestInfo &&
+					request->pRequestInfo->InfoType == HttpRequestInfoTypeAuth &&
+					static_cast<HTTP_REQUEST_AUTH_INFO*>(request->pRequestInfo->pInfo)->AuthStatus ==
 					HttpAuthStatusSuccess)
 				{
 					wprintf(L"Request is authenticated, sending 200\n");
 					result = SendHttpResponse(
-						pRequest,
+						request,
 						200,
 						wwwAuthValue,
 						"OK",
@@ -89,7 +87,7 @@ DWORD RequestQueue::DoReceiveRequests(char* wwwAuthValue) const
 				{
 					wprintf(L"Request is not authenticated, sending 401\n");
 					result = SendHttpResponse(
-						pRequest,
+						request,
 						401,
 						nullptr,
 						"Unauthorized",
@@ -101,10 +99,10 @@ DWORD RequestQueue::DoReceiveRequests(char* wwwAuthValue) const
 
 			default:
 				wprintf(L"Got a unknown request for %ws \n",
-					pRequest->CookedUrl.pFullUrl);
+					request->CookedUrl.pFullUrl);
 
 				result = SendHttpResponse(
-					pRequest,
+					request,
 					503,
 					nullptr,
 					"Not Implemented",
@@ -134,15 +132,15 @@ DWORD RequestQueue::DoReceiveRequests(char* wwwAuthValue) const
 			//
 			// This RequestID is picked from the old buffer.
 			//
-			requestId = pRequest->RequestId;
+			requestId = request->RequestId;
 
 			//
 			// Free the old buffer and allocate a new one.
 			//
-			RequestBufferLength = bytesRead;
-			pRequestBuffer.resize(RequestBufferLength);
+			bufferSize = bytesRead;
+			requestBuffer.resize(bufferSize);
 
-			pRequest = reinterpret_cast<PHTTP_REQUEST>(pRequestBuffer.data());
+			request = reinterpret_cast<PHTTP_REQUEST>(requestBuffer.data());
 		}
 		else if (ERROR_CONNECTION_INVALID == result &&
 			!HTTP_IS_NULL_ID(&requestId))
