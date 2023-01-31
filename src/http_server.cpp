@@ -40,21 +40,11 @@ DWORD RequestQueue::ReceiveRequests(char* wwwAuthValue) const
 		DWORD bytesRead{};
 		auto request = reinterpret_cast<PHTTP_REQUEST>(requestBuffer.data());
 
-		result = HttpReceiveHttpRequest(
-			m_queue.Get(), // Req Queue
-			requestId, // Req ID
-			0, // Flags
-			request, // HTTP request buffer
-			bufferSize, // req buffer length
-			&bytesRead, // bytes received
-			nullptr // LPOVERLAPPED
-		);
+		result = HttpReceiveHttpRequest(m_queue.Get(), requestId, 0, request, bufferSize, &bytesRead, nullptr);
 
 		if (NO_ERROR == result)
 		{
-			//
-			// Worked!
-			//
+			
 			switch (request->Verb)
 			{
 			case HttpVerbGET:
@@ -62,8 +52,7 @@ DWORD RequestQueue::ReceiveRequests(char* wwwAuthValue) const
 
 				if (request->pRequestInfo &&
 					request->pRequestInfo->InfoType == HttpRequestInfoTypeAuth &&
-					static_cast<HTTP_REQUEST_AUTH_INFO*>(request->pRequestInfo->pInfo)->AuthStatus ==
-					HttpAuthStatusSuccess)
+					static_cast<HTTP_REQUEST_AUTH_INFO*>(request->pRequestInfo->pInfo)->AuthStatus == HttpAuthStatusSuccess)
 				{
 					wprintf(L"Request is authenticated, sending 200\n");
 					result = SendHttpResponse(request, 200, wwwAuthValue, "OK", "Hey! You hit the server \r\n");
@@ -114,8 +103,7 @@ DWORD RequestQueue::ReceiveRequests(char* wwwAuthValue) const
 
 			request = reinterpret_cast<PHTTP_REQUEST>(requestBuffer.data());
 		}
-		else if (ERROR_CONNECTION_INVALID == result &&
-			!HTTP_IS_NULL_ID(&requestId))
+		else if (ERROR_CONNECTION_INVALID == result && !HTTP_IS_NULL_ID(&requestId))
 		{
 			// The TCP connection got torn down by the peer when we were
 			// trying to pick up a request with more buffer. We'll just move
@@ -232,7 +220,7 @@ HttpApi::~HttpApi()
 	HttpTerminate(HTTP_INITIALIZE_SERVER, nullptr);
 }
 
-DWORD RequestQueue::SendHttpResponse( PHTTP_REQUEST request, USHORT statusCode, char* wwwAuthValue, PSTR reasonText, PSTR contentText ) const
+DWORD RequestQueue::SendHttpResponse(PHTTP_REQUEST request, USHORT statusCode, char* wwwAuthValue, PSTR reasonText, PSTR contentText) const
 {
 	//
 	// Initialize the HTTP response structure.
