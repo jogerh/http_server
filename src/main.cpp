@@ -108,6 +108,29 @@ using SessionHandle = Microsoft::WRL::Wrappers::HandleT<SessionTraits>;
 using UrlGroupHandle = Microsoft::WRL::Wrappers::HandleT<UrlGroupTraits>;
 using RequestQueueHandle = Microsoft::WRL::Wrappers::HandleT<RequestQueueTraits>;
 
+class RequestQueue
+{
+public:
+	RequestQueue(RequestQueueHandle queue)
+		: m_queue{ std::move(queue) }
+	{
+	}
+
+	const RequestQueueHandle& Handle() const
+	{
+		return m_queue;
+	}
+
+	void ReceiveRequests(char* www_auth_val) const
+	{
+		// Loop while receiving requests
+		DoReceiveRequests(m_queue.Get(), www_auth_val);
+	}
+
+private:
+	RequestQueueHandle m_queue;
+};
+
 class UrlGroup
 {
 public:
@@ -120,11 +143,11 @@ public:
 		check_win32(HttpAddUrlToUrlGroup(m_urlGroup.Get(), url, 0, 0));
 	}
 
-	void Bind(const RequestQueueHandle& queue)
+	void Bind(const RequestQueue& queue)
 	{
 		HTTP_BINDING_INFO BindingProperty;
 		BindingProperty.Flags.Present = 1; // Specifies that the property is present on UrlGroup
-		BindingProperty.RequestQueueHandle = queue.Get();
+		BindingProperty.RequestQueueHandle = queue.Handle().Get();
 		SetProperty(HttpServerBindingProperty, &BindingProperty);
 	}
 
@@ -147,6 +170,8 @@ private:
 
 	UrlGroupHandle m_urlGroup;
 };
+
+
 class Session
 {
 public:
@@ -201,7 +226,7 @@ public:
 		return session;
 	}
 
-	RequestQueueHandle CreateRequestQueue(const std::wstring& name) const
+	RequestQueue CreateRequestQueue(const std::wstring& name) const
 	{
 		RequestQueueHandle queue;
 		check_win32(HttpCreateRequestQueue(m_apiVersion,
@@ -248,8 +273,7 @@ int main(int argc, char* argv[])
 
 	urlGroup.AddUrl(url);
 
-	// Loop while receiving requests
-	DoReceiveRequests(queue.Get(), wwwAuthVal);
+	queue.ReceiveRequests(wwwAuthVal);
 
 	return 0;
 }
