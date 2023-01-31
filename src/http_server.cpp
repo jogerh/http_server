@@ -233,30 +233,26 @@ HttpApi::~HttpApi()
 }
 
 DWORD RequestQueue::SendHttpResponse(
-	PHTTP_REQUEST pRequest,
-	USHORT StatusCode,
+	PHTTP_REQUEST request,
+	USHORT statusCode,
 	char* wwwAuthValue,
-	PSTR pReason,
-	PSTR pEntityString
+	PSTR reasonText,
+	PSTR contentText
 ) const
 {
 	//
 	// Initialize the HTTP response structure.
 	//
-	HttpResponse response(StatusCode, pReason);
+	HttpResponse response(statusCode, reasonText);
 
-	if (StatusCode == 401)
+	if (statusCode == 401)
 		response.AddHeader(HttpHeaderWwwAuthenticate, "Negotiate");
 
-	if (StatusCode == 200 && wwwAuthValue)
+	if (statusCode == 200 && wwwAuthValue)
 		response.AddHeader(HttpHeaderWwwAuthenticate, wwwAuthValue);
-
-	//
-	// Add a known header.
-	//
+	
 	response.AddHeader(HttpHeaderContentType, "text/html");
-
-	response.AddContent(pEntityString);
+	response.AddContent(contentText);
 	//
 	// Since we are sending all the entity body in one call, we don't have
 	// to specify the Content-Length.
@@ -265,7 +261,7 @@ DWORD RequestQueue::SendHttpResponse(
 	DWORD bytesSent;
 	auto result = HttpSendHttpResponse(
 		m_queue.Get(), // ReqQueueHandle
-		pRequest->RequestId, // Request ID
+		request->RequestId, // Request ID
 		0, // Flags
 		response.Get(), // HTTP response
 		nullptr, // pReserved1
@@ -297,7 +293,7 @@ DWORD RequestQueue::SendHttpPostResponse(PHTTP_REQUEST pRequest) const
 {
 	DWORD result;
 	DWORD bytesSent;
-	ULONG EntityBufferLength;
+	ULONG entityBufferLength;
 	ULONG BytesRead;
 	ULONG TempFileBytesWritten;
 	HANDLE hTempFile;
@@ -313,13 +309,9 @@ DWORD RequestQueue::SendHttpPostResponse(PHTTP_REQUEST pRequest) const
 	//
 	// Allocate some space for an entity buffer. We'll grow this on demand.
 	//
-	EntityBufferLength = 2048;
-	std::vector<PUCHAR> pEntityBuffer(EntityBufferLength);
+	entityBufferLength = 2048;
+	std::vector<UCHAR> entityBuffer(entityBufferLength);
 
-
-	//
-	// Initialize the HTTP response structure.
-	//
 	HttpResponse response(200, "OK");
 
 	//
@@ -338,12 +330,7 @@ DWORD RequestQueue::SendHttpPostResponse(PHTTP_REQUEST pRequest) const
 		// of these in a file & send it back. We'll create a temp file
 		//
 
-		if (GetTempFileName(
-			L".",
-			L"New",
-			0,
-			szTempName
-		) == 0)
+		if (GetTempFileName( L".", L"New", 0, szTempName ) == 0)
 		{
 			result = GetLastError();
 			wprintf(L"GetTempFileName failed with %lu \n", result);
@@ -377,8 +364,8 @@ DWORD RequestQueue::SendHttpPostResponse(PHTTP_REQUEST pRequest) const
 				m_queue.Get(),
 				pRequest->RequestId,
 				0,
-				pEntityBuffer.data(),
-				EntityBufferLength,
+				entityBuffer.data(),
+				entityBufferLength,
 				&BytesRead,
 				nullptr
 			);
@@ -392,7 +379,7 @@ DWORD RequestQueue::SendHttpPostResponse(PHTTP_REQUEST pRequest) const
 					TotalBytesRead += BytesRead;
 					WriteFile(
 						hTempFile,
-						pEntityBuffer.data(),
+						entityBuffer.data(),
 						BytesRead,
 						&TempFileBytesWritten,
 						nullptr
@@ -416,7 +403,7 @@ DWORD RequestQueue::SendHttpPostResponse(PHTTP_REQUEST pRequest) const
 					TotalBytesRead += BytesRead;
 					WriteFile(
 						hTempFile,
-						pEntityBuffer.data(),
+						entityBuffer.data(),
 						BytesRead,
 						&TempFileBytesWritten,
 						nullptr
@@ -438,20 +425,10 @@ DWORD RequestQueue::SendHttpPostResponse(PHTTP_REQUEST pRequest) const
 				//
 
 
-				StringCchPrintfA(
-					szContentLength,
-					sizeof(szContentLength),
-					"%lu",
-					TotalBytesRead
-				);
+				StringCchPrintfA( szContentLength, sizeof(szContentLength), "%lu", TotalBytesRead );
+				response.AddHeader(HttpHeaderContentLength, szContentLength);
 
-				response.AddHeader(
-					HttpHeaderContentLength,
-					szContentLength
-				);
-
-				result =
-					HttpSendHttpResponse(
+				result = HttpSendHttpResponse(
 						m_queue.Get(), // ReqQueueHandle
 						pRequest->RequestId, // Request ID
 						HTTP_SEND_RESPONSE_FLAG_MORE_DATA,

@@ -11,10 +11,10 @@ public:
 private:
 
 	DWORD SendHttpResponse(
-		PHTTP_REQUEST pRequest,
-		USHORT StatusCode,
+		PHTTP_REQUEST request,
+		USHORT statusCode,
 		char* wwwAuthValue,
-		PSTR pReason,
+		PSTR reasonText,
 		PSTR pEntity
 	) const;
 
