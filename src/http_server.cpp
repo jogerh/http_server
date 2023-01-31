@@ -232,13 +232,7 @@ HttpApi::~HttpApi()
 	HttpTerminate(HTTP_INITIALIZE_SERVER, nullptr);
 }
 
-DWORD RequestQueue::SendHttpResponse(
-	PHTTP_REQUEST request,
-	USHORT statusCode,
-	char* wwwAuthValue,
-	PSTR reasonText,
-	PSTR contentText
-) const
+DWORD RequestQueue::SendHttpResponse( PHTTP_REQUEST request, USHORT statusCode, char* wwwAuthValue, PSTR reasonText, PSTR contentText ) const
 {
 	//
 	// Initialize the HTTP response structure.
@@ -250,9 +244,10 @@ DWORD RequestQueue::SendHttpResponse(
 
 	if (statusCode == 200 && wwwAuthValue)
 		response.AddHeader(HttpHeaderWwwAuthenticate, wwwAuthValue);
-	
+
 	response.AddHeader(HttpHeaderContentType, "text/html");
 	response.AddContent(contentText);
+
 	//
 	// Since we are sending all the entity body in one call, we don't have
 	// to specify the Content-Length.
@@ -295,8 +290,6 @@ DWORD RequestQueue::SendHttpPostResponse(PHTTP_REQUEST pRequest) const
 	DWORD bytesSent;
 	ULONG entityBufferLength;
 	ULONG BytesRead;
-	ULONG TempFileBytesWritten;
-	HANDLE hTempFile;
 	TCHAR szTempName[MAX_PATH + 1];
 #define MAX_ULONG_STR ((ULONG) sizeof("4294967295"))
 	CHAR szContentLength[MAX_ULONG_STR];
@@ -304,7 +297,6 @@ DWORD RequestQueue::SendHttpPostResponse(PHTTP_REQUEST pRequest) const
 	ULONG TotalBytesRead = 0;
 
 	BytesRead = 0;
-	hTempFile = INVALID_HANDLE_VALUE;
 
 	//
 	// Allocate some space for an entity buffer. We'll grow this on demand.
@@ -323,36 +315,13 @@ DWORD RequestQueue::SendHttpPostResponse(PHTTP_REQUEST pRequest) const
 	//       Since we have not passed that flag, we can be assured that
 	//       there are no entity bodies in HTTP_REQUEST.
 	//
+	std::string messageBuffer;
 
 	if (pRequest->Flags & HTTP_REQUEST_FLAG_MORE_ENTITY_BODY_EXISTS)
 	{
 		// The entity body is send over multiple calls. Let's collect all
 		// of these in a file & send it back. We'll create a temp file
 		//
-
-		if (GetTempFileName( L".", L"New", 0, szTempName ) == 0)
-		{
-			result = GetLastError();
-			wprintf(L"GetTempFileName failed with %lu \n", result);
-			goto Done;
-		}
-
-		hTempFile = CreateFile(
-			szTempName,
-			GENERIC_READ | GENERIC_WRITE,
-			0, // don't share.
-			nullptr, // no security descriptor
-			CREATE_ALWAYS, // overrwrite existing
-			FILE_ATTRIBUTE_NORMAL, // normal file.
-			nullptr
-		);
-
-		if (hTempFile == INVALID_HANDLE_VALUE)
-		{
-			result = GetLastError();
-			wprintf(L"Could not create temporary file. Error %lu \n", result);
-			goto Done;
-		}
 
 		do
 		{
@@ -377,13 +346,6 @@ DWORD RequestQueue::SendHttpPostResponse(PHTTP_REQUEST pRequest) const
 				if (BytesRead != 0)
 				{
 					TotalBytesRead += BytesRead;
-					WriteFile(
-						hTempFile,
-						entityBuffer.data(),
-						BytesRead,
-						&TempFileBytesWritten,
-						nullptr
-					);
 				}
 				break;
 
@@ -401,13 +363,7 @@ DWORD RequestQueue::SendHttpPostResponse(PHTTP_REQUEST pRequest) const
 				if (BytesRead != 0)
 				{
 					TotalBytesRead += BytesRead;
-					WriteFile(
-						hTempFile,
-						entityBuffer.data(),
-						BytesRead,
-						&TempFileBytesWritten,
-						nullptr
-					);
+					messageBuffer.append(begin(entityBuffer), begin(entityBuffer) + BytesRead);
 				}
 
 				//
@@ -425,21 +381,21 @@ DWORD RequestQueue::SendHttpPostResponse(PHTTP_REQUEST pRequest) const
 				//
 
 
-				StringCchPrintfA( szContentLength, sizeof(szContentLength), "%lu", TotalBytesRead );
+				StringCchPrintfA(szContentLength, sizeof(szContentLength), "%lu", TotalBytesRead);
 				response.AddHeader(HttpHeaderContentLength, szContentLength);
 
 				result = HttpSendHttpResponse(
-						m_queue.Get(), // ReqQueueHandle
-						pRequest->RequestId, // Request ID
-						HTTP_SEND_RESPONSE_FLAG_MORE_DATA,
-						response.Get(), // HTTP response
-						nullptr, // pReserved1
-						&bytesSent, // bytes sent (optional)
-						nullptr, // pReserved2
-						0, // Reserved3
-						nullptr, // LPOVERLAPPED
-						nullptr // pReserved4
-					);
+					m_queue.Get(), // ReqQueueHandle
+					pRequest->RequestId, // Request ID
+					HTTP_SEND_RESPONSE_FLAG_MORE_DATA,
+					response.Get(), // HTTP response
+					nullptr, // pReserved1
+					&bytesSent, // bytes sent (optional)
+					nullptr, // pReserved2
+					0, // Reserved3
+					nullptr, // LPOVERLAPPED
+					nullptr // pReserved4
+				);
 
 				if (result != NO_ERROR)
 				{
@@ -451,16 +407,9 @@ DWORD RequestQueue::SendHttpPostResponse(PHTTP_REQUEST pRequest) const
 				//
 				// Send entity body from a file handle.
 				//
-				dataChunk.DataChunkType =
-					HttpDataChunkFromFileHandle;
-
-				dataChunk.FromFileHandle.
-					ByteRange.StartingOffset.QuadPart = 0;
-
-				dataChunk.FromFileHandle.
-					ByteRange.Length.QuadPart = HTTP_BYTE_RANGE_TO_EOF;
-
-				dataChunk.FromFileHandle.FileHandle = hTempFile;
+				dataChunk.DataChunkType = HttpDataChunkFromMemory;
+				dataChunk.FromMemory.BufferLength = static_cast<ULONG>(messageBuffer.size());
+				dataChunk.FromMemory.pBuffer = messageBuffer.data();
 
 				result = HttpSendResponseEntityBody(
 					m_queue.Get(),
@@ -518,11 +467,7 @@ DWORD RequestQueue::SendHttpPostResponse(PHTTP_REQUEST pRequest) const
 Done:
 
 
-	if (INVALID_HANDLE_VALUE != hTempFile)
-	{
-		CloseHandle(hTempFile);
-		DeleteFile(szTempName);
-	}
+	messageBuffer.clear();
 
 	return result;
 }
