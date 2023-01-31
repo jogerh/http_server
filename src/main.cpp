@@ -5,20 +5,21 @@
 #include <sspi.h>
 #include <strsafe.h>
 #include <vector>
-#define NUM_SCHEMES 2
-#define MAX_USERNAME_LENGTH 100
+#include <winrt/base.h>
+#include <wrl/wrappers/corewrappers.h>
 
 void INITIALIZE_HTTP_RESPONSE(HTTP_RESPONSE* resp, USHORT status, PSTR reason) {
 	RtlZeroMemory((resp), sizeof(*(resp)));
 	resp->StatusCode = (status);
 	resp->pReason = (reason);
-	resp->ReasonLength = (USHORT)strlen(reason);
+	resp->ReasonLength = static_cast<USHORT>(strlen(reason));
 }
 
 void ADD_KNOWN_HEADER(HTTP_RESPONSE& Response, DWORD HeaderId, PSTR RawValue) {
 	Response.Headers.KnownHeaders[(HeaderId)].pRawValue = (RawValue);
-	Response.Headers.KnownHeaders[(HeaderId)].RawValueLength = (USHORT)strlen(RawValue);
+	Response.Headers.KnownHeaders[(HeaderId)].RawValueLength = static_cast<USHORT>(strlen(RawValue));
 }
+
 
 //
 // Prototypes.
@@ -45,9 +46,68 @@ SendHttpPostResponse(
 	IN PHTTP_REQUEST pRequest
 );
 
+struct unmovable
+{
+	unmovable() = default;
+	unmovable(const unmovable&) = delete;
+	unmovable(unmovable&&) = delete;
+	unmovable& operator=(const unmovable&) = delete;
+	unmovable& operator=(unmovable&&) = delete;
+};
+
+using winrt::check_win32;
+
+// Handle specializations for implemented RAII wrappers
+struct SessionTraits
+{
+	using Type = HTTP_SERVER_SESSION_ID;
+
+	static bool Close(Type h) noexcept
+	{
+		return HttpCloseServerSession(h) == NO_ERROR;
+	}
+
+	static Type GetInvalidValue() noexcept
+	{
+		return HTTP_NULL_ID;
+	}
+};
+
+using SessionHandle = Microsoft::WRL::Wrappers::HandleT<SessionTraits>;
+
+
+class HttpApi : public unmovable
+{
+public:
+	static constexpr HTTPAPI_VERSION HttpApiVersion = HTTPAPI_VERSION_2;
+
+	HttpApi()
+	{
+		check_win32(HttpInitialize(
+			HttpApiVersion,
+			HTTP_INITIALIZE_SERVER, // Flags
+			nullptr // Reserved
+		));
+	}
+
+	SessionHandle CreateSession()
+	{
+		SessionHandle ssID;
+		check_win32(HttpCreateServerSession(HttpApiVersion,
+			ssID.GetAddressOf(),
+			0));
+		return ssID;
+	}
+
+	~HttpApi()
+	{
+		HttpTerminate(HTTP_INITIALIZE_SERVER, nullptr);
+	}
+};
+
 int main(int argc, char* argv[])
 {
-	auto url = L"http://+:9002/";
+	const auto url = L"http://+:9002/";
 	char* wwwAuthVal = nullptr;
 
 	if (argc > 1)
@@ -56,44 +116,20 @@ int main(int argc, char* argv[])
 		wwwAuthVal = argv[1];
 	}
 
-	//
-	// Initialize HTTP APIs.
-	//
-	HTTPAPI_VERSION HttpApiVersion = HTTPAPI_VERSION_2;
-	ULONG retCode = HttpInitialize(
-		HttpApiVersion,
-		HTTP_INITIALIZE_SERVER, // Flags
-		nullptr // Reserved
-	);
-
-	if (retCode != NO_ERROR)
-	{
-		wprintf(L"HttpInitialize failed with %lu \n", retCode);
-		return retCode;
-	}
+	HttpApi api;
 
 
 	//
 	// Create a server session handle
 	//
-	HTTP_SERVER_SESSION_ID ssID = HTTP_NULL_ID;
-	retCode = HttpCreateServerSession(HttpApiVersion,
-		&ssID,
-		0);
-
-
-	if (retCode != NO_ERROR)
-	{
-		wprintf(L"HttpCreateServerSession failed with %lu \n", retCode);
-		goto CleanUp;
-	}
+	const SessionHandle session = api.CreateSession();
 
 	HTTP_SERVER_AUTHENTICATION_INFO AuthInfo;
 	ZeroMemory(&AuthInfo, sizeof(HTTP_SERVER_AUTHENTICATION_INFO));
 	AuthInfo.Flags.Present = 1;
 	AuthInfo.AuthSchemes = HTTP_AUTH_ENABLE_NEGOTIATE;
 
-	retCode = HttpSetServerSessionProperty(ssID, HttpServerAuthenticationProperty, &AuthInfo,
+	auto retCode = HttpSetServerSessionProperty(session.Get(), HttpServerAuthenticationProperty, &AuthInfo,
 		sizeof(HTTP_SERVER_AUTHENTICATION_INFO));
 
 	if (retCode != NO_ERROR)
@@ -106,7 +142,7 @@ int main(int argc, char* argv[])
 	// Create UrlGroup handle
 	//
 	HTTP_URL_GROUP_ID urlGroupId = HTTP_NULL_ID;
-	retCode = HttpCreateUrlGroup(ssID,
+	retCode = HttpCreateUrlGroup(session.Get(),
 		&urlGroupId,
 		0);
 
@@ -121,7 +157,7 @@ int main(int argc, char* argv[])
 	// Create a request queue handle
 	//
 	HANDLE hReqQueue = nullptr;
-	retCode = HttpCreateRequestQueue(HttpApiVersion,
+	retCode = HttpCreateRequestQueue(HttpApi::HttpApiVersion,
 		L"MyQueue",
 		nullptr,
 		0,
@@ -229,21 +265,6 @@ CleanUp:
 		}
 	}
 
-
-	//
-	// Close the serversession
-	//
-
-	if (!HTTP_IS_NULL_ID(&urlGroupId))
-	{
-		retCode = HttpCloseServerSession(ssID);
-
-		if (retCode != NO_ERROR)
-		{
-			wprintf(L"HttpCloseServerSession failed with %lu \n", retCode);
-		}
-	}
-
 	//
 	// Close the Request Queue handle.
 	//
@@ -258,10 +279,6 @@ CleanUp:
 		}
 	}
 
-	//
-	// Call HttpTerminate.
-	//
-	HttpTerminate(HTTP_INITIALIZE_SERVER, nullptr);
 
 	return retCode;
 }
@@ -766,7 +783,7 @@ SendHttpPostResponse(
 
 Done:
 
-	
+
 	if (INVALID_HANDLE_VALUE != hTempFile)
 	{
 		CloseHandle(hTempFile);
