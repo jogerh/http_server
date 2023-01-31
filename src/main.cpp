@@ -21,26 +21,6 @@ void ADD_KNOWN_HEADER(HTTP_RESPONSE& Response, DWORD HeaderId, PSTR RawValue) {
 }
 
 
-//
-// Prototypes.
-//
-
-DWORD
-SendHttpResponse(
-	IN HANDLE hReqQueue,
-	IN PHTTP_REQUEST pRequest,
-	IN USHORT StatusCode,
-	IN char* wwwAuthValue,
-	__in IN PSTR pReason,
-	__in_opt IN PSTR pEntity
-);
-
-DWORD
-SendHttpPostResponse(
-	IN HANDLE hReqQueue,
-	IN PHTTP_REQUEST pRequest
-);
-
 struct unmovable
 {
 	unmovable() = default;
@@ -118,13 +98,23 @@ public:
 
 	void ReceiveRequests(char* www_auth_val) const
 	{
-		// Loop while receiving requests
 		DoReceiveRequests(www_auth_val);
 	}
 
+
 private:
 
-	DWORD DoReceiveRequests(char* wwwAuthVal ) const;
+	DWORD SendHttpResponse(
+			PHTTP_REQUEST pRequest,
+			USHORT StatusCode,
+			char* wwwAuthValue,
+			PSTR pReason,
+			PSTR pEntity
+		) const;
+
+	DWORD SendHttpPostResponse(PHTTP_REQUEST pRequest ) const;
+
+	DWORD DoReceiveRequests(char* wwwAuthVal) const;
 	RequestQueueHandle m_queue;
 };
 
@@ -134,7 +124,7 @@ public:
 	UrlGroup(UrlGroupHandle urlGroup) : m_urlGroup{ std::move(urlGroup) }
 	{
 	}
-	
+
 	void AddUrl(const wchar_t* url)
 	{
 		check_win32(HttpAddUrlToUrlGroup(m_urlGroup.Get(), url, 0, 0));
@@ -284,7 +274,7 @@ Arguments:
 Return Value:
 	Success/Failure.
 --***************************************************************************/
-DWORD RequestQueue::DoReceiveRequests(char* wwwAuthValue ) const
+DWORD RequestQueue::DoReceiveRequests(char* wwwAuthValue) const
 {
 	ULONG result;
 	HTTP_REQUEST_ID requestId;
@@ -339,7 +329,6 @@ DWORD RequestQueue::DoReceiveRequests(char* wwwAuthValue ) const
 				{
 					wprintf(L"Request is authenticated, sending 200\n");
 					result = SendHttpResponse(
-						m_queue.Get(),
 						pRequest,
 						200,
 						wwwAuthValue,
@@ -351,7 +340,6 @@ DWORD RequestQueue::DoReceiveRequests(char* wwwAuthValue ) const
 				{
 					wprintf(L"Request is not authenticated, sending 401\n");
 					result = SendHttpResponse(
-						m_queue.Get(),
 						pRequest,
 						401,
 						nullptr,
@@ -367,7 +355,6 @@ DWORD RequestQueue::DoReceiveRequests(char* wwwAuthValue ) const
 					pRequest->CookedUrl.pFullUrl);
 
 				result = SendHttpResponse(
-					m_queue.Get(),
 					pRequest,
 					503,
 					nullptr,
@@ -439,15 +426,13 @@ Arguments:
 Return Value:
 	Success/Failure.
 --***************************************************************************/
-DWORD
-SendHttpResponse(
-	IN HANDLE hReqQueue,
+DWORD RequestQueue::SendHttpResponse(
 	IN PHTTP_REQUEST pRequest,
 	IN USHORT StatusCode,
 	IN char* wwwAuthValue,
 	__in IN PSTR pReason,
 	__in_opt IN PSTR pEntityString
-)
+) const
 {
 	HTTP_RESPONSE response;
 	HTTP_DATA_CHUNK dataChunk;
@@ -489,7 +474,7 @@ SendHttpResponse(
 	//
 
 	result = HttpSendHttpResponse(
-		hReqQueue, // ReqQueueHandle
+		m_queue.Get(), // ReqQueueHandle
 		pRequest->RequestId, // Request ID
 		0, // Flags
 		&response, // HTTP response
@@ -518,11 +503,7 @@ Arguments:
 Return Value:
 	Success/Failure.
 --***************************************************************************/
-DWORD
-SendHttpPostResponse(
-	IN HANDLE hReqQueue,
-	IN PHTTP_REQUEST pRequest
-)
+DWORD RequestQueue::SendHttpPostResponse( PHTTP_REQUEST pRequest) const
 {
 	HTTP_RESPONSE response;
 	DWORD result;
@@ -604,7 +585,7 @@ SendHttpPostResponse(
 			//
 			BytesRead = 0;
 			result = HttpReceiveRequestEntityBody(
-				hReqQueue,
+				m_queue.Get(),
 				pRequest->RequestId,
 				0,
 				pEntityBuffer.data(),
@@ -683,7 +664,7 @@ SendHttpPostResponse(
 
 				result =
 					HttpSendHttpResponse(
-						hReqQueue, // ReqQueueHandle
+						m_queue.Get(), // ReqQueueHandle
 						pRequest->RequestId, // Request ID
 						HTTP_SEND_RESPONSE_FLAG_MORE_DATA,
 						&response, // HTTP response
@@ -717,7 +698,7 @@ SendHttpPostResponse(
 				dataChunk.FromFileHandle.FileHandle = hTempFile;
 
 				result = HttpSendResponseEntityBody(
-					hReqQueue,
+					m_queue.Get(),
 					pRequest->RequestId,
 					0, // This is the last send.
 					1, // Entity Chunk Count.
@@ -753,7 +734,7 @@ SendHttpPostResponse(
 	//
 
 	result = HttpSendHttpResponse(
-		hReqQueue, // ReqQueueHandle
+		m_queue.Get(), // ReqQueueHandle
 		pRequest->RequestId, // Request ID
 		0,
 		&response, // HTTP response
