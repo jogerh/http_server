@@ -69,3 +69,47 @@ private:
 	const HTTPAPI_VERSION m_apiVersion = HTTPAPI_VERSION_2;
 
 };
+
+struct HttpResponse
+{
+	HttpResponse(unsigned short status, const char* reason) {
+		m_response.StatusCode = status;
+		m_response.pReason = reason;
+		m_response.ReasonLength = static_cast<unsigned short>(strlen(reason));
+	}
+
+	void AddHeader(unsigned long HeaderId, const char* rawValue) {
+		m_response.Headers.KnownHeaders[HeaderId].pRawValue = rawValue;
+		m_response.Headers.KnownHeaders[HeaderId].RawValueLength = static_cast<unsigned short>(strlen(rawValue));
+	}
+
+	HTTP_RESPONSE* Get()
+	{
+		return &m_response;
+	}
+
+	void AddContent(const char* content)
+	{
+		if (content)
+		{
+			m_content.push_back(content);
+			{
+				HTTP_DATA_CHUNK chunk;
+
+				chunk.DataChunkType = HttpDataChunkFromMemory;
+				chunk.FromMemory.pBuffer = const_cast<char*>(m_content.back().c_str());
+				chunk.FromMemory.BufferLength = static_cast<ULONG>(strlen(content));
+
+				m_chunks.push_back(chunk);
+			}
+			m_response.EntityChunkCount = static_cast<unsigned short>(m_chunks.size());
+			m_response.pEntityChunks = m_chunks.data();
+		}
+
+	}
+
+private:
+	HTTP_RESPONSE m_response{};
+	std::vector<HTTP_DATA_CHUNK> m_chunks;
+	std::vector<std::string> m_content;
+};

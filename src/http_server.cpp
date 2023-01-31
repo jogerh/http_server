@@ -2,17 +2,7 @@
 #include <strsafe.h>
 #include <winrt/base.h>
 
-void InitializeResponse(HTTP_RESPONSE* resp, USHORT status, PCSTR reason) {
-	RtlZeroMemory((resp), sizeof(*(resp)));
-	resp->StatusCode = (status);
-	resp->pReason = (reason);
-	resp->ReasonLength = static_cast<USHORT>(strlen(reason));
-}
 
-void AddHeader(HTTP_RESPONSE& Response, DWORD HeaderId, PCSTR RawValue) {
-	Response.Headers.KnownHeaders[HeaderId].pRawValue = RawValue;
-	Response.Headers.KnownHeaders[HeaderId].RawValueLength = static_cast<USHORT>(strlen(RawValue));
-}
 
 /***************************************************************************++
 Routine Description:
@@ -253,34 +243,20 @@ DWORD RequestQueue::SendHttpResponse(
 	//
 	// Initialize the HTTP response structure.
 	//
-	HTTP_RESPONSE response;
-	InitializeResponse(&response, StatusCode, pReason);
+	HttpResponse response(StatusCode, pReason);
 
 	if (StatusCode == 401)
-		AddHeader(response, HttpHeaderWwwAuthenticate, "Negotiate");
+		response.AddHeader(HttpHeaderWwwAuthenticate, "Negotiate");
 
 	if (StatusCode == 200 && wwwAuthValue)
-		AddHeader(response, HttpHeaderWwwAuthenticate, wwwAuthValue);
+		response.AddHeader(HttpHeaderWwwAuthenticate, wwwAuthValue);
 
 	//
 	// Add a known header.
 	//
-	AddHeader(response, HttpHeaderContentType, "text/html");
+	response.AddHeader(HttpHeaderContentType, "text/html");
 
-	HTTP_DATA_CHUNK dataChunk;
-	if (pEntityString)
-	{
-		//
-		// Add an entity chunk
-		//
-		dataChunk.DataChunkType = HttpDataChunkFromMemory;
-		dataChunk.FromMemory.pBuffer = pEntityString;
-		dataChunk.FromMemory.BufferLength = static_cast<ULONG>(strlen(pEntityString));
-
-		response.EntityChunkCount = 1;
-		response.pEntityChunks = &dataChunk;
-	}
-
+	response.AddContent(pEntityString);
 	//
 	// Since we are sending all the entity body in one call, we don't have
 	// to specify the Content-Length.
@@ -291,7 +267,7 @@ DWORD RequestQueue::SendHttpResponse(
 		m_queue.Get(), // ReqQueueHandle
 		pRequest->RequestId, // Request ID
 		0, // Flags
-		&response, // HTTP response
+		response.Get(), // HTTP response
 		nullptr, // pReserved1
 		&bytesSent, // bytes sent   (OPTIONAL)
 		nullptr, // pReserved2   (must be NULL)
@@ -344,8 +320,7 @@ DWORD RequestQueue::SendHttpPostResponse(PHTTP_REQUEST pRequest) const
 	//
 	// Initialize the HTTP response structure.
 	//
-	HTTP_RESPONSE response;
-	InitializeResponse(&response, 200, "OK");
+	HttpResponse response(200, "OK");
 
 	//
 	// For POST, we'll echo back the entity that we got from the client.
@@ -470,8 +445,7 @@ DWORD RequestQueue::SendHttpPostResponse(PHTTP_REQUEST pRequest) const
 					TotalBytesRead
 				);
 
-				AddHeader(
-					response,
+				response.AddHeader(
 					HttpHeaderContentLength,
 					szContentLength
 				);
@@ -481,7 +455,7 @@ DWORD RequestQueue::SendHttpPostResponse(PHTTP_REQUEST pRequest) const
 						m_queue.Get(), // ReqQueueHandle
 						pRequest->RequestId, // Request ID
 						HTTP_SEND_RESPONSE_FLAG_MORE_DATA,
-						&response, // HTTP response
+						response.Get(), // HTTP response
 						nullptr, // pReserved1
 						&bytesSent, // bytes sent (optional)
 						nullptr, // pReserved2
@@ -551,7 +525,7 @@ DWORD RequestQueue::SendHttpPostResponse(PHTTP_REQUEST pRequest) const
 		m_queue.Get(), // ReqQueueHandle
 		pRequest->RequestId, // Request ID
 		0,
-		&response, // HTTP response
+		response.Get(), // HTTP response
 		nullptr, // pReserved1
 		&bytesSent, // bytes sent (optional)
 		nullptr, // pReserved2
