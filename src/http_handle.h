@@ -1,5 +1,8 @@
 #pragma once
+#define SECURITY_WIN32
 
+#include <http.h>
+#include <Windows.h>
 #include <winrt/base.h>
 #include <wrl/wrappers/corewrappers.h>
 
