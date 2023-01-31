@@ -108,44 +108,103 @@ using SessionHandle = Microsoft::WRL::Wrappers::HandleT<SessionTraits>;
 using UrlGroupHandle = Microsoft::WRL::Wrappers::HandleT<UrlGroupTraits>;
 using RequestQueueHandle = Microsoft::WRL::Wrappers::HandleT<RequestQueueTraits>;
 
-template <typename T>
-void SetSessionProperty(const SessionHandle& session, HTTP_SERVER_PROPERTY prop, T* info)
+class UrlGroup
 {
-	check_win32(HttpSetServerSessionProperty(session.Get(), prop, info, sizeof(T)));
-}
+public:
+	UrlGroup(UrlGroupHandle urlGroup) : m_urlGroup{ std::move(urlGroup) }
+	{
+	}
+	
+	void AddUrl(const wchar_t* url)
+	{
+		check_win32(HttpAddUrlToUrlGroup(m_urlGroup.Get(), url, 0, 0));
+	}
+
+	void Bind(const RequestQueueHandle& queue)
+	{
+		HTTP_BINDING_INFO BindingProperty;
+		BindingProperty.Flags.Present = 1; // Specifies that the property is present on UrlGroup
+		BindingProperty.RequestQueueHandle = queue.Get();
+		SetProperty(HttpServerBindingProperty, &BindingProperty);
+	}
+
+	void SetTimeout(int timeout)
+	{
+		HTTP_TIMEOUT_LIMIT_INFO CGTimeout{};
+		CGTimeout.Flags.Present = 1; // Specifies that the property is present on UrlGroup
+		CGTimeout.EntityBody = timeout;   //The timeout is in secs
+
+		SetProperty(HttpServerTimeoutsProperty, &CGTimeout);
+	}
+
+private:
+
+	template <typename T>
+	void SetProperty(HTTP_SERVER_PROPERTY property, T* value)
+	{
+		check_win32(HttpSetUrlGroupProperty(m_urlGroup.Get(), property, value, sizeof(T)));
+	}
+
+	UrlGroupHandle m_urlGroup;
+};
+class Session
+{
+public:
+	Session(SessionHandle session) : m_session{ std::move(session) }
+	{
+	}
+
+	UrlGroup CreateUrlGroup() const
+	{
+		UrlGroupHandle urlGroup;
+		check_win32(HttpCreateUrlGroup(m_session.Get(), urlGroup.GetAddressOf(), 0));
+		return urlGroup;
+	}
+
+	void EnableAuthNegotiation()
+	{
+		HTTP_SERVER_AUTHENTICATION_INFO AuthInfo{};
+		AuthInfo.Flags.Present = 1;
+		AuthInfo.AuthSchemes = HTTP_AUTH_ENABLE_NEGOTIATE;
+
+		SetProperty(HttpServerAuthenticationProperty, &AuthInfo);
+	}
+
+private:
+	template <typename T>
+	void SetProperty(HTTP_SERVER_PROPERTY prop, T* info)
+	{
+		check_win32(HttpSetServerSessionProperty(m_session.Get(), prop, info, sizeof(T)));
+	}
+
+	SessionHandle m_session;
+};
+
 
 class HttpApi : public unmovable
 {
 public:
-	static constexpr HTTPAPI_VERSION HttpApiVersion = HTTPAPI_VERSION_2;
 
 	HttpApi()
 	{
 		check_win32(HttpInitialize(
-			HttpApiVersion,
+			m_apiVersion,
 			HTTP_INITIALIZE_SERVER, // Flags
 			nullptr // Reserved
 		));
 	}
 
-	static SessionHandle CreateSession()
+	Session CreateSession() const
 	{
 		SessionHandle session;
-		check_win32(HttpCreateServerSession(HttpApiVersion, session.GetAddressOf(), 0));
+		check_win32(HttpCreateServerSession(m_apiVersion, session.GetAddressOf(), 0));
 		return session;
 	}
 
-	static UrlGroupHandle CreateUrlGroup(const SessionHandle& session)
-	{
-		UrlGroupHandle urlGroup;
-		check_win32(HttpCreateUrlGroup(session.Get(), urlGroup.GetAddressOf(), 0));
-		return urlGroup;
-	}
-
-	static RequestQueueHandle CreateRequestQueue(const std::wstring& name)
+	RequestQueueHandle CreateRequestQueue(const std::wstring& name) const
 	{
 		RequestQueueHandle queue;
-		check_win32(HttpCreateRequestQueue(HttpApiVersion,
+		check_win32(HttpCreateRequestQueue(m_apiVersion,
 			name.c_str(),
 			nullptr,
 			0,
@@ -157,6 +216,10 @@ public:
 	{
 		HttpTerminate(HTTP_INITIALIZE_SERVER, nullptr);
 	}
+
+private:
+	const HTTPAPI_VERSION m_apiVersion = HTTPAPI_VERSION_2;
+
 };
 
 int main(int argc, char* argv[])
@@ -172,47 +235,21 @@ int main(int argc, char* argv[])
 
 	HttpApi api;
 
-	const auto session = api.CreateSession();
+	auto session = api.CreateSession();
+	session.EnableAuthNegotiation();
 
-	HTTP_SERVER_AUTHENTICATION_INFO AuthInfo{};
-	AuthInfo.Flags.Present = 1;
-	AuthInfo.AuthSchemes = HTTP_AUTH_ENABLE_NEGOTIATE;
+	const auto queue = api.CreateRequestQueue(L"MyQueue");
 
-	SetSessionProperty(session, HttpServerAuthenticationProperty, &AuthInfo);
+	auto urlGroup = session.CreateUrlGroup();
+	urlGroup.Bind(queue);
+	urlGroup.SetTimeout(50);
 
-	const auto urlGroupId = api.CreateUrlGroup(session);
-	const auto hReqQueue = api.CreateRequestQueue(L"MyQueue");
+	wprintf(L"we are listening for requests on the following url: %s\n", url);
 
-	HTTP_BINDING_INFO BindingProperty;
-	BindingProperty.Flags.Present = 1; // Specifies that the property is present on UrlGroup
-	BindingProperty.RequestQueueHandle = hReqQueue.Get();
-
-	//
-	// Bind the request queue to UrlGroup
-	//
-	check_win32(HttpSetUrlGroupProperty(urlGroupId.Get(),
-		HttpServerBindingProperty,
-		&BindingProperty,
-		sizeof(BindingProperty)));
-
-	//
-	// Set EntityBody Timeout property on UrlGroup
-	//
-	HTTP_TIMEOUT_LIMIT_INFO CGTimeout {};
-	CGTimeout.Flags.Present = 1; // Specifies that the property is present on UrlGroup
-	CGTimeout.EntityBody = 50; //The timeout is in secs
-
-	check_win32(HttpSetUrlGroupProperty(urlGroupId.Get(),
-		HttpServerTimeoutsProperty,
-		&CGTimeout,
-		sizeof(HTTP_TIMEOUT_LIMIT_INFO)));
-
-	wprintf( L"we are listening for requests on the following url: %s\n", url);
-
-	check_win32(HttpAddUrlToUrlGroup(urlGroupId.Get(), url, 0, 0));
+	urlGroup.AddUrl(url);
 
 	// Loop while receiving requests
-	DoReceiveRequests(hReqQueue.Get(), wwwAuthVal);
+	DoReceiveRequests(queue.Get(), wwwAuthVal);
 
 	return 0;
 }
