@@ -2,16 +2,16 @@
 #include <strsafe.h>
 #include <winrt/base.h>
 
-void INITIALIZE_HTTP_RESPONSE(HTTP_RESPONSE* resp, USHORT status, PCSTR reason) {
+void InitializeResponse(HTTP_RESPONSE* resp, USHORT status, PCSTR reason) {
 	RtlZeroMemory((resp), sizeof(*(resp)));
 	resp->StatusCode = (status);
 	resp->pReason = (reason);
 	resp->ReasonLength = static_cast<USHORT>(strlen(reason));
 }
 
-void ADD_KNOWN_HEADER(HTTP_RESPONSE& Response, DWORD HeaderId, PCSTR RawValue) {
-	Response.Headers.KnownHeaders[(HeaderId)].pRawValue = (RawValue);
-	Response.Headers.KnownHeaders[(HeaderId)].RawValueLength = static_cast<USHORT>(strlen(RawValue));
+void AddHeader(HTTP_RESPONSE& Response, DWORD HeaderId, PCSTR RawValue) {
+	Response.Headers.KnownHeaders[HeaderId].pRawValue = RawValue;
+	Response.Headers.KnownHeaders[HeaderId].RawValueLength = static_cast<USHORT>(strlen(RawValue));
 }
 
 /***************************************************************************++
@@ -23,7 +23,7 @@ Arguments:
 Return Value:
 	Success/Failure.
 --***************************************************************************/
-DWORD RequestQueue::DoReceiveRequests(char* wwwAuthValue) const
+DWORD RequestQueue::ReceiveRequests(char* wwwAuthValue) const
 {
 	//
 	// Allocate a 2K buffer. Should be good for most requests, we'll grow
@@ -33,7 +33,6 @@ DWORD RequestQueue::DoReceiveRequests(char* wwwAuthValue) const
 	ULONG bufferSize = sizeof(HTTP_REQUEST) + 2048;
 	std::vector<CHAR> requestBuffer(bufferSize);
 
-	auto request = reinterpret_cast<PHTTP_REQUEST>(requestBuffer.data());
 
 	//
 	// Wait for a new request -- This is indicated by a NULL request ID.
@@ -49,6 +48,8 @@ DWORD RequestQueue::DoReceiveRequests(char* wwwAuthValue) const
 		fill(begin(requestBuffer), end(requestBuffer), 0);
 
 		DWORD bytesRead{};
+		auto request = reinterpret_cast<PHTTP_REQUEST>(requestBuffer.data());
+
 		result = HttpReceiveHttpRequest(
 			m_queue.Get(), // Req Queue
 			requestId, // Req ID
@@ -75,39 +76,20 @@ DWORD RequestQueue::DoReceiveRequests(char* wwwAuthValue) const
 					HttpAuthStatusSuccess)
 				{
 					wprintf(L"Request is authenticated, sending 200\n");
-					result = SendHttpResponse(
-						request,
-						200,
-						wwwAuthValue,
-						"OK",
-						"Hey! You hit the server \r\n"
-					);
+					result = SendHttpResponse(request, 200, wwwAuthValue, "OK", "Hey! You hit the server \r\n");
 				}
 				else
 				{
 					wprintf(L"Request is not authenticated, sending 401\n");
-					result = SendHttpResponse(
-						request,
-						401,
-						nullptr,
-						"Unauthorized",
-						"Gimme Negotiate \r\n"
-					);
+					result = SendHttpResponse(request, 401, nullptr, "Unauthorized", "Gimme Negotiate \r\n");
 				}
 
 				break;
 
 			default:
-				wprintf(L"Got a unknown request for %ws \n",
-					request->CookedUrl.pFullUrl);
+				wprintf(L"Got a unknown request for %ws \n", request->CookedUrl.pFullUrl);
 
-				result = SendHttpResponse(
-					request,
-					503,
-					nullptr,
-					"Not Implemented",
-					nullptr
-				);
+				result = SendHttpResponse(request, 503, nullptr, "Not Implemented", nullptr);
 				break;
 			}
 
@@ -161,7 +143,7 @@ DWORD RequestQueue::DoReceiveRequests(char* wwwAuthValue) const
 	return result;
 }
 
-RequestQueue::RequestQueue(RequestQueueHandle queue): m_queue{ std::move(queue) }
+RequestQueue::RequestQueue(RequestQueueHandle queue) : m_queue{ std::move(queue) }
 {
 }
 
@@ -170,12 +152,7 @@ const RequestQueueHandle& RequestQueue::Handle() const
 	return m_queue;
 }
 
-void RequestQueue::ReceiveRequests(char* www_auth_val) const
-{
-	DoReceiveRequests(www_auth_val);
-}
-
-UrlGroup::UrlGroup(UrlGroupHandle urlGroup): m_urlGroup{ std::move(urlGroup) }
+UrlGroup::UrlGroup(UrlGroupHandle urlGroup) : m_urlGroup{ std::move(urlGroup) }
 {
 }
 
@@ -207,7 +184,7 @@ void UrlGroup::SetProperty(HTTP_SERVER_PROPERTY property, T* value)
 	check_win32(HttpSetUrlGroupProperty(m_urlGroup.Get(), property, value, sizeof(T)));
 }
 
-Session::Session(SessionHandle session): m_session{ std::move(session) }
+Session::Session(SessionHandle session) : m_session{ std::move(session) }
 {
 }
 
@@ -253,10 +230,10 @@ RequestQueue HttpApi::CreateRequestQueue(const std::wstring& name) const
 {
 	RequestQueueHandle queue;
 	check_win32(HttpCreateRequestQueue(m_apiVersion,
-	                                   name.c_str(),
-	                                   nullptr,
-	                                   0,
-	                                   queue.GetAddressOf()));
+		name.c_str(),
+		nullptr,
+		0,
+		queue.GetAddressOf()));
 	return queue;
 }
 
@@ -277,18 +254,18 @@ DWORD RequestQueue::SendHttpResponse(
 	// Initialize the HTTP response structure.
 	//
 	HTTP_RESPONSE response;
-	INITIALIZE_HTTP_RESPONSE(&response, StatusCode, pReason);
+	InitializeResponse(&response, StatusCode, pReason);
 
 	if (StatusCode == 401)
-		ADD_KNOWN_HEADER(response, HttpHeaderWwwAuthenticate, "Negotiate");
+		AddHeader(response, HttpHeaderWwwAuthenticate, "Negotiate");
 
 	if (StatusCode == 200 && wwwAuthValue)
-		ADD_KNOWN_HEADER(response, HttpHeaderWwwAuthenticate, wwwAuthValue);
+		AddHeader(response, HttpHeaderWwwAuthenticate, wwwAuthValue);
 
 	//
 	// Add a known header.
 	//
-	ADD_KNOWN_HEADER(response, HttpHeaderContentType, "text/html");
+	AddHeader(response, HttpHeaderContentType, "text/html");
 
 	HTTP_DATA_CHUNK dataChunk;
 	if (pEntityString)
@@ -368,7 +345,7 @@ DWORD RequestQueue::SendHttpPostResponse(PHTTP_REQUEST pRequest) const
 	// Initialize the HTTP response structure.
 	//
 	HTTP_RESPONSE response;
-	INITIALIZE_HTTP_RESPONSE(&response, 200, "OK");
+	InitializeResponse(&response, 200, "OK");
 
 	//
 	// For POST, we'll echo back the entity that we got from the client.
@@ -493,7 +470,7 @@ DWORD RequestQueue::SendHttpPostResponse(PHTTP_REQUEST pRequest) const
 					TotalBytesRead
 				);
 
-				ADD_KNOWN_HEADER(
+				AddHeader(
 					response,
 					HttpHeaderContentLength,
 					szContentLength

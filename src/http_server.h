@@ -6,7 +6,7 @@ class RequestQueue
 public:
 	RequestQueue(RequestQueueHandle queue);
 	const RequestQueueHandle& Handle() const;
-	void ReceiveRequests(char* www_auth_val) const;
+	DWORD ReceiveRequests(char* www_auth_val) const;
 
 private:
 
@@ -19,7 +19,6 @@ private:
 	) const;
 
 	DWORD SendHttpPostResponse(PHTTP_REQUEST pRequest) const;
-	DWORD DoReceiveRequests(char* wwwAuthVal) const;
 	RequestQueueHandle m_queue;
 };
 
