@@ -2,14 +2,14 @@
 #include <strsafe.h>
 #include <winrt/base.h>
 
-void INITIALIZE_HTTP_RESPONSE(HTTP_RESPONSE* resp, USHORT status, PSTR reason) {
+void INITIALIZE_HTTP_RESPONSE(HTTP_RESPONSE* resp, USHORT status, PCSTR reason) {
 	RtlZeroMemory((resp), sizeof(*(resp)));
 	resp->StatusCode = (status);
 	resp->pReason = (reason);
 	resp->ReasonLength = static_cast<USHORT>(strlen(reason));
 }
 
-void ADD_KNOWN_HEADER(HTTP_RESPONSE& Response, DWORD HeaderId, PSTR RawValue) {
+void ADD_KNOWN_HEADER(HTTP_RESPONSE& Response, DWORD HeaderId, PCSTR RawValue) {
 	Response.Headers.KnownHeaders[(HeaderId)].pRawValue = (RawValue);
 	Response.Headers.KnownHeaders[(HeaderId)].RawValueLength = static_cast<USHORT>(strlen(RawValue));
 }
@@ -267,34 +267,18 @@ HttpApi::~HttpApi()
 	HttpTerminate(HTTP_INITIALIZE_SERVER, nullptr);
 }
 
-/***************************************************************************++
-Routine Description:
-	The routine sends a HTTP response.
-Arguments:
-	hReqQueue     - Handle to the request queue.
-	pRequest      - The parsed HTTP request.
-	StatusCode    - Response Status Code.
-	pReason       - Response reason phrase.
-	pEntityString - Response entity body.
-Return Value:
-	Success/Failure.
---***************************************************************************/
 DWORD RequestQueue::SendHttpResponse(
-	IN PHTTP_REQUEST pRequest,
-	IN USHORT StatusCode,
-	IN char* wwwAuthValue,
-	__in IN PSTR pReason,
-	__in_opt IN PSTR pEntityString
+	PHTTP_REQUEST pRequest,
+	USHORT StatusCode,
+	char* wwwAuthValue,
+	PSTR pReason,
+	PSTR pEntityString
 ) const
 {
-	HTTP_RESPONSE response;
-	HTTP_DATA_CHUNK dataChunk;
-	DWORD result;
-	DWORD bytesSent;
-
 	//
 	// Initialize the HTTP response structure.
 	//
+	HTTP_RESPONSE response;
 	INITIALIZE_HTTP_RESPONSE(&response, StatusCode, pReason);
 
 	if (StatusCode == 401)
@@ -308,6 +292,7 @@ DWORD RequestQueue::SendHttpResponse(
 	//
 	ADD_KNOWN_HEADER(response, HttpHeaderContentType, "text/html");
 
+	HTTP_DATA_CHUNK dataChunk;
 	if (pEntityString)
 	{
 		//
@@ -326,7 +311,8 @@ DWORD RequestQueue::SendHttpResponse(
 	// to specify the Content-Length.
 	//
 
-	result = HttpSendHttpResponse(
+	DWORD bytesSent;
+	auto result = HttpSendHttpResponse(
 		m_queue.Get(), // ReqQueueHandle
 		pRequest->RequestId, // Request ID
 		0, // Flags
@@ -358,7 +344,6 @@ Return Value:
 --***************************************************************************/
 DWORD RequestQueue::SendHttpPostResponse(PHTTP_REQUEST pRequest) const
 {
-	HTTP_RESPONSE response;
 	DWORD result;
 	DWORD bytesSent;
 	ULONG EntityBufferLength;
@@ -384,6 +369,7 @@ DWORD RequestQueue::SendHttpPostResponse(PHTTP_REQUEST pRequest) const
 	//
 	// Initialize the HTTP response structure.
 	//
+	HTTP_RESPONSE response;
 	INITIALIZE_HTTP_RESPONSE(&response, 200, "OK");
 
 	//
