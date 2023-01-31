@@ -89,8 +89,24 @@ struct UrlGroupTraits
 	}
 };
 
+struct RequestQueueTraits
+{
+	using Type = HANDLE;
+
+	static bool Close(Type h) noexcept
+	{
+		return HttpCloseRequestQueue(h) == NO_ERROR;
+	}
+
+	static Type GetInvalidValue() noexcept
+	{
+		return nullptr;
+	}
+};
+
 using SessionHandle = Microsoft::WRL::Wrappers::HandleT<SessionTraits>;
 using UrlGroupHandle = Microsoft::WRL::Wrappers::HandleT<UrlGroupTraits>;
+using RequestQueueHandle = Microsoft::WRL::Wrappers::HandleT<RequestQueueTraits>;
 
 template <typename T>
 void SetSessionProperty(const SessionHandle& session, HTTP_SERVER_PROPERTY prop, T* info)
@@ -112,7 +128,7 @@ public:
 		));
 	}
 
-	SessionHandle CreateSession()
+	static SessionHandle CreateSession()
 	{
 		SessionHandle session;
 		check_win32(HttpCreateServerSession(HttpApiVersion, session.GetAddressOf(), 0));
@@ -124,6 +140,17 @@ public:
 		UrlGroupHandle urlGroup;
 		check_win32(HttpCreateUrlGroup(session.Get(), urlGroup.GetAddressOf(), 0));
 		return urlGroup;
+	}
+
+	static RequestQueueHandle CreateRequestQueue(const std::wstring& name)
+	{
+		RequestQueueHandle queue;
+		check_win32(HttpCreateRequestQueue(HttpApiVersion,
+			name.c_str(),
+			nullptr,
+			0,
+			queue.GetAddressOf()));
+		return queue;
 	}
 
 	~HttpApi()
@@ -145,8 +172,7 @@ int main(int argc, char* argv[])
 
 	HttpApi api;
 
-
-	const SessionHandle session = api.CreateSession();
+	const auto session = api.CreateSession();
 
 	HTTP_SERVER_AUTHENTICATION_INFO AuthInfo{};
 	AuthInfo.Flags.Present = 1;
@@ -154,108 +180,41 @@ int main(int argc, char* argv[])
 
 	SetSessionProperty(session, HttpServerAuthenticationProperty, &AuthInfo);
 
-	UrlGroupHandle urlGroupId = api.CreateUrlGroup(session);
-
-
-	//
-	// Create a request queue handle
-	//
-	HANDLE hReqQueue = nullptr;
-	auto retCode = HttpCreateRequestQueue(HttpApi::HttpApiVersion,
-		L"MyQueue",
-		nullptr,
-		0,
-		&hReqQueue);
-
-
-	if (retCode != NO_ERROR)
-	{
-		wprintf(L"HttpCreateRequestQueue failed with %lu \n", retCode);
-		goto CleanUp;
-	}
+	const auto urlGroupId = api.CreateUrlGroup(session);
+	const auto hReqQueue = api.CreateRequestQueue(L"MyQueue");
 
 	HTTP_BINDING_INFO BindingProperty;
 	BindingProperty.Flags.Present = 1; // Specifies that the property is present on UrlGroup
-	BindingProperty.RequestQueueHandle = hReqQueue;
-
+	BindingProperty.RequestQueueHandle = hReqQueue.Get();
 
 	//
 	// Bind the request queue to UrlGroup
 	//
-
-	retCode = HttpSetUrlGroupProperty(urlGroupId.Get(),
+	check_win32(HttpSetUrlGroupProperty(urlGroupId.Get(),
 		HttpServerBindingProperty,
 		&BindingProperty,
-		sizeof(BindingProperty));
-
-	if (retCode != NO_ERROR)
-	{
-		wprintf(L"HttpSetUrlGroupProperty failed with %lu \n", retCode);
-		goto CleanUp;
-	}
-
+		sizeof(BindingProperty)));
 
 	//
 	// Set EntityBody Timeout property on UrlGroup
 	//
-	HTTP_TIMEOUT_LIMIT_INFO CGTimeout;
-	ZeroMemory(&CGTimeout, sizeof(HTTP_TIMEOUT_LIMIT_INFO));
-
+	HTTP_TIMEOUT_LIMIT_INFO CGTimeout {};
 	CGTimeout.Flags.Present = 1; // Specifies that the property is present on UrlGroup
 	CGTimeout.EntityBody = 50; //The timeout is in secs
 
-
-	retCode = HttpSetUrlGroupProperty(urlGroupId.Get(),
+	check_win32(HttpSetUrlGroupProperty(urlGroupId.Get(),
 		HttpServerTimeoutsProperty,
 		&CGTimeout,
-		sizeof(HTTP_TIMEOUT_LIMIT_INFO));
+		sizeof(HTTP_TIMEOUT_LIMIT_INFO)));
 
-	if (retCode != NO_ERROR)
-	{
-		wprintf(L"HttpSetUrlGroupProperty failed with %lu \n", retCode);
-		goto CleanUp;
-	}
+	wprintf( L"we are listening for requests on the following url: %s\n", url);
 
-	wprintf(
-		L"we are listening for requests on the following url: %s\n",
-		url);
-
-
-	retCode = HttpAddUrlToUrlGroup(urlGroupId.Get(),
-		url,
-		0,
-		0);
-
-
-	if (retCode != NO_ERROR)
-	{
-		wprintf(L"HttpAddUrl failed with %lu \n", retCode);
-		goto CleanUp;
-	}
+	check_win32(HttpAddUrlToUrlGroup(urlGroupId.Get(), url, 0, 0));
 
 	// Loop while receiving requests
-	DoReceiveRequests(hReqQueue, wwwAuthVal);
+	DoReceiveRequests(hReqQueue.Get(), wwwAuthVal);
 
-CleanUp:
-
-
-
-	//
-	// Close the Request Queue handle.
-	//
-
-	if (hReqQueue)
-	{
-		retCode = HttpCloseRequestQueue(hReqQueue);
-
-		if (retCode != NO_ERROR)
-		{
-			wprintf(L"HttpCloseRequestQueue failed with %lu \n", retCode);
-		}
-	}
-
-
-	return retCode;
+	return 0;
 }
 
 /***************************************************************************++
