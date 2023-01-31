@@ -7,24 +7,17 @@
 #define NUM_SCHEMES 2
 #define MAX_USERNAME_LENGTH 100
 
-#define INITIALIZE_HTTP_RESPONSE( resp, status, reason )                    \
-    do                                                                      \
-    {                                                                       \
-        RtlZeroMemory( (resp), sizeof(*(resp)) );                           \
-        (resp)->StatusCode = (status);                                      \
-        (resp)->pReason = (reason);                                         \
-        (resp)->ReasonLength = (USHORT) strlen(reason);                     \
-    } while (FALSE)
+void INITIALIZE_HTTP_RESPONSE(HTTP_RESPONSE* resp, USHORT status, PSTR reason) {
+	RtlZeroMemory((resp), sizeof(*(resp)));
+	resp->StatusCode = (status);
+	resp->pReason = (reason);
+	resp->ReasonLength = (USHORT)strlen(reason);
+}
 
-
-
-#define ADD_KNOWN_HEADER(Response, HeaderId, RawValue)                      \
-    do                                                                      \
-    {                                                                       \
-        (Response).Headers.KnownHeaders[(HeaderId)].pRawValue = (RawValue); \
-        (Response).Headers.KnownHeaders[(HeaderId)].RawValueLength =        \
-            (USHORT) strlen(RawValue);                                      \
-    } while(FALSE)
+void ADD_KNOWN_HEADER(HTTP_RESPONSE& Response, DWORD HeaderId, PSTR RawValue) {
+	Response.Headers.KnownHeaders[(HeaderId)].pRawValue = (RawValue);
+	Response.Headers.KnownHeaders[(HeaderId)].RawValueLength = (USHORT)strlen(RawValue);
+}
 
 #define ALLOC_MEM(cb) HeapAlloc(GetProcessHeap(), 0, (cb))
 #define FREE_MEM(ptr) HeapFree(GetProcessHeap(), 0, (ptr))
@@ -54,19 +47,10 @@ SendHttpPostResponse(
 	IN PHTTP_REQUEST pRequest
 );
 
-int main(int argc,
-	__in_ecount(argc) char* argv[])
+int main(int argc, char* argv[])
 {
-	ULONG           retCode;
-	HANDLE          hReqQueue = NULL;
-	HTTPAPI_VERSION HttpApiVersion = HTTPAPI_VERSION_2;
-	HTTP_SERVER_SESSION_ID ssID = HTTP_NULL_ID;
-	HTTP_URL_GROUP_ID urlGroupId = HTTP_NULL_ID;
-	HTTP_BINDING_INFO BindingProperty;
-	HTTP_TIMEOUT_LIMIT_INFO CGTimeout;
-	HTTP_SERVER_AUTHENTICATION_INFO AuthInfo;
-	const wchar_t* url = L"http://+:9002/";
-	char* wwwAuthVal = NULL;
+	auto url = L"http://+:9002/";
+	char* wwwAuthVal = nullptr;
 
 	if (argc > 1)
 	{
@@ -77,11 +61,11 @@ int main(int argc,
 	//
 	// Initialize HTTP APIs.
 	//
-
-	retCode = HttpInitialize(
+	HTTPAPI_VERSION HttpApiVersion = HTTPAPI_VERSION_2;
+	ULONG retCode = HttpInitialize(
 		HttpApiVersion,
-		HTTP_INITIALIZE_SERVER,    // Flags
-		NULL                       // Reserved
+		HTTP_INITIALIZE_SERVER, // Flags
+		nullptr // Reserved
 	);
 
 	if (retCode != NO_ERROR)
@@ -94,7 +78,7 @@ int main(int argc,
 	//
 	// Create a server session handle
 	//
-
+	HTTP_SERVER_SESSION_ID ssID = HTTP_NULL_ID;
 	retCode = HttpCreateServerSession(HttpApiVersion,
 		&ssID,
 		0);
@@ -106,12 +90,13 @@ int main(int argc,
 		goto CleanUp;
 	}
 
-
+	HTTP_SERVER_AUTHENTICATION_INFO AuthInfo;
 	ZeroMemory(&AuthInfo, sizeof(HTTP_SERVER_AUTHENTICATION_INFO));
 	AuthInfo.Flags.Present = 1;
 	AuthInfo.AuthSchemes = HTTP_AUTH_ENABLE_NEGOTIATE;
 
-	retCode = HttpSetServerSessionProperty(ssID, HttpServerAuthenticationProperty, &AuthInfo, sizeof(HTTP_SERVER_AUTHENTICATION_INFO));
+	retCode = HttpSetServerSessionProperty(ssID, HttpServerAuthenticationProperty, &AuthInfo,
+		sizeof(HTTP_SERVER_AUTHENTICATION_INFO));
 
 	if (retCode != NO_ERROR)
 	{
@@ -122,7 +107,7 @@ int main(int argc,
 	//
 	// Create UrlGroup handle
 	//
-
+	HTTP_URL_GROUP_ID urlGroupId = HTTP_NULL_ID;
 	retCode = HttpCreateUrlGroup(ssID,
 		&urlGroupId,
 		0);
@@ -137,10 +122,10 @@ int main(int argc,
 	//
 	// Create a request queue handle
 	//
-
+	HANDLE hReqQueue = nullptr;
 	retCode = HttpCreateRequestQueue(HttpApiVersion,
 		L"MyQueue",
-		NULL,
+		nullptr,
 		0,
 		&hReqQueue);
 
@@ -151,9 +136,8 @@ int main(int argc,
 		goto CleanUp;
 	}
 
-
-
-	BindingProperty.Flags.Present = 1;// Specifies that the property is present on UrlGroup
+	HTTP_BINDING_INFO BindingProperty;
+	BindingProperty.Flags.Present = 1; // Specifies that the property is present on UrlGroup
 	BindingProperty.RequestQueueHandle = hReqQueue;
 
 
@@ -176,7 +160,7 @@ int main(int argc,
 	//
 	// Set EntityBody Timeout property on UrlGroup
 	//
-
+	HTTP_TIMEOUT_LIMIT_INFO CGTimeout;
 	ZeroMemory(&CGTimeout, sizeof(HTTP_TIMEOUT_LIMIT_INFO));
 
 	CGTimeout.Flags.Present = 1; // Specifies that the property is present on UrlGroup
@@ -223,16 +207,14 @@ CleanUp:
 	//
 	if (!HTTP_IS_NULL_ID(&urlGroupId))
 	{
-
 		retCode = HttpRemoveUrlFromUrlGroup(urlGroupId,
-			NULL,
+			nullptr,
 			HTTP_URL_FLAG_REMOVE_ALL);
 
 		if (retCode != NO_ERROR)
 		{
 			wprintf(L"HttpRemoveUrl failed with %lu \n", retCode);
 		}
-
 	}
 
 	//
@@ -262,7 +244,6 @@ CleanUp:
 		{
 			wprintf(L"HttpCloseServerSession failed with %lu \n", retCode);
 		}
-
 	}
 
 	//
@@ -282,7 +263,7 @@ CleanUp:
 	//
 	// Call HttpTerminate.
 	//
-	HttpTerminate(HTTP_INITIALIZE_SERVER, NULL);
+	HttpTerminate(HTTP_INITIALIZE_SERVER, nullptr);
 
 	return retCode;
 }
@@ -302,21 +283,21 @@ DoReceiveRequests(
 	IN char* wwwAuthValue
 )
 {
-	ULONG              result;
-	HTTP_REQUEST_ID    requestId;
-	DWORD              bytesRead;
-	PHTTP_REQUEST      pRequest;
-	PCHAR              pRequestBuffer;
-	ULONG              RequestBufferLength;
+	ULONG result;
+	HTTP_REQUEST_ID requestId;
+	DWORD bytesRead;
+	PHTTP_REQUEST pRequest;
+	PCHAR pRequestBuffer;
+	ULONG RequestBufferLength;
 
 	//
 	// Allocate a 2K buffer. Should be good for most requests, we'll grow
 	// this if required. We also need space for a HTTP_REQUEST structure.
 	//
 	RequestBufferLength = sizeof(HTTP_REQUEST) + 2048;
-	pRequestBuffer = (PCHAR)ALLOC_MEM(RequestBufferLength);
+	pRequestBuffer = static_cast<PCHAR>(ALLOC_MEM(RequestBufferLength));
 
-	if (pRequestBuffer == NULL)
+	if (pRequestBuffer == nullptr)
 	{
 		return ERROR_NOT_ENOUGH_MEMORY;
 	}
@@ -336,13 +317,13 @@ DoReceiveRequests(
 		RtlZeroMemory(pRequest, RequestBufferLength);
 
 		result = HttpReceiveHttpRequest(
-			hReqQueue,          // Req Queue
-			requestId,          // Req ID
-			0,                  // Flags
-			pRequest,           // HTTP request buffer
-			RequestBufferLength,// req buffer length
-			&bytesRead,         // bytes received
-			NULL                // LPOVERLAPPED
+			hReqQueue, // Req Queue
+			requestId, // Req ID
+			0, // Flags
+			pRequest, // HTTP request buffer
+			RequestBufferLength, // req buffer length
+			&bytesRead, // bytes received
+			nullptr // LPOVERLAPPED
 		);
 
 		if (NO_ERROR == result)
@@ -357,7 +338,8 @@ DoReceiveRequests(
 
 				if (pRequest->pRequestInfo &&
 					pRequest->pRequestInfo->InfoType == HttpRequestInfoTypeAuth &&
-					((HTTP_REQUEST_AUTH_INFO*)pRequest->pRequestInfo->pInfo)->AuthStatus == HttpAuthStatusSuccess)
+					static_cast<HTTP_REQUEST_AUTH_INFO*>(pRequest->pRequestInfo->pInfo)->AuthStatus ==
+					HttpAuthStatusSuccess)
 				{
 					wprintf(L"Request is authenticated, sending 200\n");
 					result = SendHttpResponse(
@@ -376,7 +358,7 @@ DoReceiveRequests(
 						hReqQueue,
 						pRequest,
 						401,
-						NULL,
+						nullptr,
 						"Unauthorized",
 						"Gimme Negotiate \r\n"
 					);
@@ -392,9 +374,9 @@ DoReceiveRequests(
 					hReqQueue,
 					pRequest,
 					503,
-					NULL,
+					nullptr,
 					"Not Implemented",
-					NULL
+					nullptr
 				);
 				break;
 			}
@@ -427,16 +409,15 @@ DoReceiveRequests(
 			//
 			RequestBufferLength = bytesRead;
 			FREE_MEM(pRequestBuffer);
-			pRequestBuffer = (PCHAR)ALLOC_MEM(RequestBufferLength);
+			pRequestBuffer = static_cast<PCHAR>(ALLOC_MEM(RequestBufferLength));
 
-			if (pRequestBuffer == NULL)
+			if (pRequestBuffer == nullptr)
 			{
 				result = ERROR_NOT_ENOUGH_MEMORY;
 				break;
 			}
 
 			pRequest = (PHTTP_REQUEST)pRequestBuffer;
-
 		}
 		else if (ERROR_CONNECTION_INVALID == result &&
 			!HTTP_IS_NULL_ID(&requestId))
@@ -451,7 +432,6 @@ DoReceiveRequests(
 		{
 			break;
 		}
-
 	} // for(;;)
 
 	if (pRequestBuffer)
@@ -484,10 +464,10 @@ SendHttpResponse(
 	__in_opt IN PSTR pEntityString
 )
 {
-	HTTP_RESPONSE   response;
+	HTTP_RESPONSE response;
 	HTTP_DATA_CHUNK dataChunk;
-	DWORD           result;
-	DWORD           bytesSent;
+	DWORD result;
+	DWORD bytesSent;
 
 	//
 	// Initialize the HTTP response structure.
@@ -512,7 +492,7 @@ SendHttpResponse(
 		//
 		dataChunk.DataChunkType = HttpDataChunkFromMemory;
 		dataChunk.FromMemory.pBuffer = pEntityString;
-		dataChunk.FromMemory.BufferLength = (ULONG)strlen(pEntityString);
+		dataChunk.FromMemory.BufferLength = static_cast<ULONG>(strlen(pEntityString));
 
 		response.EntityChunkCount = 1;
 		response.pEntityChunks = &dataChunk;
@@ -524,16 +504,16 @@ SendHttpResponse(
 	//
 
 	result = HttpSendHttpResponse(
-		hReqQueue,           // ReqQueueHandle
+		hReqQueue, // ReqQueueHandle
 		pRequest->RequestId, // Request ID
-		0,                   // Flags
-		&response,           // HTTP response
-		NULL,                // pReserved1
-		&bytesSent,          // bytes sent   (OPTIONAL)
-		NULL,                // pReserved2   (must be NULL)
-		0,                   // Reserved3    (must be 0)
-		NULL,                // LPOVERLAPPED (OPTIONAL)
-		NULL                 // pReserved4   (must be NULL)
+		0, // Flags
+		&response, // HTTP response
+		nullptr, // pReserved1
+		&bytesSent, // bytes sent   (OPTIONAL)
+		nullptr, // pReserved2   (must be NULL)
+		0, // Reserved3    (must be 0)
+		nullptr, // LPOVERLAPPED (OPTIONAL)
+		nullptr // pReserved4   (must be NULL)
 	);
 
 	if (result != NO_ERROR)
@@ -559,19 +539,19 @@ SendHttpPostResponse(
 	IN PHTTP_REQUEST pRequest
 )
 {
-	HTTP_RESPONSE   response;
-	DWORD           result;
-	DWORD           bytesSent;
-	PUCHAR          pEntityBuffer;
-	ULONG           EntityBufferLength;
-	ULONG           BytesRead;
-	ULONG           TempFileBytesWritten;
-	HANDLE          hTempFile;
-	TCHAR           szTempName[MAX_PATH + 1];
+	HTTP_RESPONSE response;
+	DWORD result;
+	DWORD bytesSent;
+	PUCHAR pEntityBuffer;
+	ULONG EntityBufferLength;
+	ULONG BytesRead;
+	ULONG TempFileBytesWritten;
+	HANDLE hTempFile;
+	TCHAR szTempName[MAX_PATH + 1];
 #define MAX_ULONG_STR ((ULONG) sizeof("4294967295"))
-	CHAR            szContentLength[MAX_ULONG_STR];
+	CHAR szContentLength[MAX_ULONG_STR];
 	HTTP_DATA_CHUNK dataChunk;
-	ULONG           TotalBytesRead = 0;
+	ULONG TotalBytesRead = 0;
 
 	BytesRead = 0;
 	hTempFile = INVALID_HANDLE_VALUE;
@@ -580,9 +560,9 @@ SendHttpPostResponse(
 	// Allocate some space for an entity buffer. We'll grow this on demand.
 	//
 	EntityBufferLength = 2048;
-	pEntityBuffer = (PUCHAR)ALLOC_MEM(EntityBufferLength);
+	pEntityBuffer = static_cast<PUCHAR>(ALLOC_MEM(EntityBufferLength));
 
-	if (pEntityBuffer == NULL)
+	if (pEntityBuffer == nullptr)
 	{
 		result = ERROR_NOT_ENOUGH_MEMORY;
 		wprintf(L"Insufficient resources \n");
@@ -625,11 +605,11 @@ SendHttpPostResponse(
 		hTempFile = CreateFile(
 			szTempName,
 			GENERIC_READ | GENERIC_WRITE,
-			0,                             // don't share.
-			NULL,                          // no security descriptor
-			CREATE_ALWAYS,                 // overrwrite existing
-			FILE_ATTRIBUTE_NORMAL,         // normal file.
-			NULL
+			0, // don't share.
+			nullptr, // no security descriptor
+			CREATE_ALWAYS, // overrwrite existing
+			FILE_ATTRIBUTE_NORMAL, // normal file.
+			nullptr
 		);
 
 		if (hTempFile == INVALID_HANDLE_VALUE)
@@ -652,7 +632,7 @@ SendHttpPostResponse(
 				pEntityBuffer,
 				EntityBufferLength,
 				&BytesRead,
-				NULL
+				nullptr
 			);
 
 			switch (result)
@@ -667,7 +647,7 @@ SendHttpPostResponse(
 						pEntityBuffer,
 						BytesRead,
 						&TempFileBytesWritten,
-						NULL
+						nullptr
 					);
 				}
 				break;
@@ -691,7 +671,7 @@ SendHttpPostResponse(
 						pEntityBuffer,
 						BytesRead,
 						&TempFileBytesWritten,
-						NULL
+						nullptr
 					);
 				}
 
@@ -725,16 +705,16 @@ SendHttpPostResponse(
 
 				result =
 					HttpSendHttpResponse(
-						hReqQueue,           // ReqQueueHandle
+						hReqQueue, // ReqQueueHandle
 						pRequest->RequestId, // Request ID
 						HTTP_SEND_RESPONSE_FLAG_MORE_DATA,
-						&response,           // HTTP response
-						NULL,                // pReserved1
-						&bytesSent,          // bytes sent (optional)
-						NULL,                // pReserved2
-						0,                   // Reserved3
-						NULL,                // LPOVERLAPPED
-						NULL                 // pReserved4
+						&response, // HTTP response
+						nullptr, // pReserved1
+						&bytesSent, // bytes sent (optional)
+						nullptr, // pReserved2
+						0, // Reserved3
+						nullptr, // LPOVERLAPPED
+						nullptr // pReserved4
 					);
 
 				if (result != NO_ERROR)
@@ -761,14 +741,14 @@ SendHttpPostResponse(
 				result = HttpSendResponseEntityBody(
 					hReqQueue,
 					pRequest->RequestId,
-					0,                    // This is the last send.
-					1,                    // Entity Chunk Count.
+					0, // This is the last send.
+					1, // Entity Chunk Count.
 					&dataChunk,
-					NULL,
-					NULL,
+					nullptr,
+					nullptr,
 					0,
-					NULL,
-					NULL
+					nullptr,
+					nullptr
 				);
 
 				if (result != NO_ERROR)
@@ -789,30 +769,26 @@ SendHttpPostResponse(
 					result);
 				goto Done;
 			}
-
 		} while (TRUE);
 	}
-	else
-	{
-		// This request does not have any entity body.
-		//
+	// This request does not have any entity body.
+	//
 
-		result = HttpSendHttpResponse(
-			hReqQueue,           // ReqQueueHandle
-			pRequest->RequestId, // Request ID
-			0,
-			&response,           // HTTP response
-			NULL,                // pReserved1
-			&bytesSent,          // bytes sent (optional)
-			NULL,                // pReserved2
-			0,                   // Reserved3
-			NULL,                // LPOVERLAPPED
-			NULL                 // pReserved4
-		);
-		if (result != NO_ERROR)
-		{
-			wprintf(L"HttpSendHttpResponse failed with %lu \n", result);
-		}
+	result = HttpSendHttpResponse(
+		hReqQueue, // ReqQueueHandle
+		pRequest->RequestId, // Request ID
+		0,
+		&response, // HTTP response
+		nullptr, // pReserved1
+		&bytesSent, // bytes sent (optional)
+		nullptr, // pReserved2
+		0, // Reserved3
+		nullptr, // LPOVERLAPPED
+		nullptr // pReserved4
+	);
+	if (result != NO_ERROR)
+	{
+		wprintf(L"HttpSendHttpResponse failed with %lu \n", result);
 	}
 
 Done:
