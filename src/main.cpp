@@ -4,6 +4,7 @@
 #include <Windows.h>
 #include <sspi.h>
 #include <strsafe.h>
+#include <vector>
 #define NUM_SCHEMES 2
 #define MAX_USERNAME_LENGTH 100
 
@@ -18,9 +19,6 @@ void ADD_KNOWN_HEADER(HTTP_RESPONSE& Response, DWORD HeaderId, PSTR RawValue) {
 	Response.Headers.KnownHeaders[(HeaderId)].pRawValue = (RawValue);
 	Response.Headers.KnownHeaders[(HeaderId)].RawValueLength = (USHORT)strlen(RawValue);
 }
-
-#define ALLOC_MEM(cb) HeapAlloc(GetProcessHeap(), 0, (cb))
-#define FREE_MEM(ptr) HeapFree(GetProcessHeap(), 0, (ptr))
 
 //
 // Prototypes.
@@ -286,23 +284,16 @@ DoReceiveRequests(
 	ULONG result;
 	HTTP_REQUEST_ID requestId;
 	DWORD bytesRead;
-	PHTTP_REQUEST pRequest;
-	PCHAR pRequestBuffer;
-	ULONG RequestBufferLength;
 
 	//
 	// Allocate a 2K buffer. Should be good for most requests, we'll grow
 	// this if required. We also need space for a HTTP_REQUEST structure.
 	//
-	RequestBufferLength = sizeof(HTTP_REQUEST) + 2048;
-	pRequestBuffer = static_cast<PCHAR>(ALLOC_MEM(RequestBufferLength));
 
-	if (pRequestBuffer == nullptr)
-	{
-		return ERROR_NOT_ENOUGH_MEMORY;
-	}
+	ULONG RequestBufferLength = sizeof(HTTP_REQUEST) + 2048;
+	std::vector<PCHAR> pRequestBuffer(RequestBufferLength);
 
-	pRequest = (PHTTP_REQUEST)pRequestBuffer;
+	auto pRequest = reinterpret_cast<PHTTP_REQUEST>(pRequestBuffer.data());
 
 	//
 	// Wait for a new request -- This is indicated by a NULL request ID.
@@ -408,16 +399,9 @@ DoReceiveRequests(
 			// Free the old buffer and allocate a new one.
 			//
 			RequestBufferLength = bytesRead;
-			FREE_MEM(pRequestBuffer);
-			pRequestBuffer = static_cast<PCHAR>(ALLOC_MEM(RequestBufferLength));
+			pRequestBuffer.resize(RequestBufferLength);
 
-			if (pRequestBuffer == nullptr)
-			{
-				result = ERROR_NOT_ENOUGH_MEMORY;
-				break;
-			}
-
-			pRequest = (PHTTP_REQUEST)pRequestBuffer;
+			pRequest = reinterpret_cast<PHTTP_REQUEST>(pRequestBuffer.data());
 		}
 		else if (ERROR_CONNECTION_INVALID == result &&
 			!HTTP_IS_NULL_ID(&requestId))
@@ -434,10 +418,6 @@ DoReceiveRequests(
 		}
 	} // for(;;)
 
-	if (pRequestBuffer)
-	{
-		FREE_MEM(pRequestBuffer);
-	}
 
 	return result;
 }
@@ -542,7 +522,6 @@ SendHttpPostResponse(
 	HTTP_RESPONSE response;
 	DWORD result;
 	DWORD bytesSent;
-	PUCHAR pEntityBuffer;
 	ULONG EntityBufferLength;
 	ULONG BytesRead;
 	ULONG TempFileBytesWritten;
@@ -560,14 +539,8 @@ SendHttpPostResponse(
 	// Allocate some space for an entity buffer. We'll grow this on demand.
 	//
 	EntityBufferLength = 2048;
-	pEntityBuffer = static_cast<PUCHAR>(ALLOC_MEM(EntityBufferLength));
+	std::vector<PUCHAR> pEntityBuffer(EntityBufferLength);
 
-	if (pEntityBuffer == nullptr)
-	{
-		result = ERROR_NOT_ENOUGH_MEMORY;
-		wprintf(L"Insufficient resources \n");
-		goto Done;
-	}
 
 	//
 	// Initialize the HTTP response structure.
@@ -629,7 +602,7 @@ SendHttpPostResponse(
 				hReqQueue,
 				pRequest->RequestId,
 				0,
-				pEntityBuffer,
+				pEntityBuffer.data(),
 				EntityBufferLength,
 				&BytesRead,
 				nullptr
@@ -644,7 +617,7 @@ SendHttpPostResponse(
 					TotalBytesRead += BytesRead;
 					WriteFile(
 						hTempFile,
-						pEntityBuffer,
+						pEntityBuffer.data(),
 						BytesRead,
 						&TempFileBytesWritten,
 						nullptr
@@ -668,7 +641,7 @@ SendHttpPostResponse(
 					TotalBytesRead += BytesRead;
 					WriteFile(
 						hTempFile,
-						pEntityBuffer,
+						pEntityBuffer.data(),
 						BytesRead,
 						&TempFileBytesWritten,
 						nullptr
@@ -793,11 +766,7 @@ SendHttpPostResponse(
 
 Done:
 
-	if (pEntityBuffer)
-	{
-		FREE_MEM(pEntityBuffer);
-	}
-
+	
 	if (INVALID_HANDLE_VALUE != hTempFile)
 	{
 		CloseHandle(hTempFile);
