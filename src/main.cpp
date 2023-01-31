@@ -73,8 +73,30 @@ struct SessionTraits
 	}
 };
 
-using SessionHandle = Microsoft::WRL::Wrappers::HandleT<SessionTraits>;
+struct UrlGroupTraits
+{
+	using Type = HTTP_URL_GROUP_ID;
 
+	static bool Close(Type h) noexcept
+	{
+		return HttpRemoveUrlFromUrlGroup(h, nullptr, HTTP_URL_FLAG_REMOVE_ALL) == NO_ERROR &&
+			HttpCloseUrlGroup(h) == NO_ERROR;
+	}
+
+	static Type GetInvalidValue() noexcept
+	{
+		return HTTP_NULL_ID;
+	}
+};
+
+using SessionHandle = Microsoft::WRL::Wrappers::HandleT<SessionTraits>;
+using UrlGroupHandle = Microsoft::WRL::Wrappers::HandleT<UrlGroupTraits>;
+
+template <typename T>
+void SetSessionProperty(const SessionHandle& session, HTTP_SERVER_PROPERTY prop, T* info)
+{
+	check_win32(HttpSetServerSessionProperty(session.Get(), prop, info, sizeof(T)));
+}
 
 class HttpApi : public unmovable
 {
@@ -92,11 +114,16 @@ public:
 
 	SessionHandle CreateSession()
 	{
-		SessionHandle ssID;
-		check_win32(HttpCreateServerSession(HttpApiVersion,
-			ssID.GetAddressOf(),
-			0));
-		return ssID;
+		SessionHandle session;
+		check_win32(HttpCreateServerSession(HttpApiVersion, session.GetAddressOf(), 0));
+		return session;
+	}
+
+	static UrlGroupHandle CreateUrlGroup(const SessionHandle& session)
+	{
+		UrlGroupHandle urlGroup;
+		check_win32(HttpCreateUrlGroup(session.Get(), urlGroup.GetAddressOf(), 0));
+		return urlGroup;
 	}
 
 	~HttpApi()
@@ -119,45 +146,22 @@ int main(int argc, char* argv[])
 	HttpApi api;
 
 
-	//
-	// Create a server session handle
-	//
 	const SessionHandle session = api.CreateSession();
 
-	HTTP_SERVER_AUTHENTICATION_INFO AuthInfo;
-	ZeroMemory(&AuthInfo, sizeof(HTTP_SERVER_AUTHENTICATION_INFO));
+	HTTP_SERVER_AUTHENTICATION_INFO AuthInfo{};
 	AuthInfo.Flags.Present = 1;
 	AuthInfo.AuthSchemes = HTTP_AUTH_ENABLE_NEGOTIATE;
 
-	auto retCode = HttpSetServerSessionProperty(session.Get(), HttpServerAuthenticationProperty, &AuthInfo,
-		sizeof(HTTP_SERVER_AUTHENTICATION_INFO));
+	SetSessionProperty(session, HttpServerAuthenticationProperty, &AuthInfo);
 
-	if (retCode != NO_ERROR)
-	{
-		wprintf(L"HttpSetServerSessionProperty failed with %lu \n", retCode);
-		goto CleanUp;
-	}
+	UrlGroupHandle urlGroupId = api.CreateUrlGroup(session);
 
-	//
-	// Create UrlGroup handle
-	//
-	HTTP_URL_GROUP_ID urlGroupId = HTTP_NULL_ID;
-	retCode = HttpCreateUrlGroup(session.Get(),
-		&urlGroupId,
-		0);
-
-
-	if (retCode != NO_ERROR)
-	{
-		wprintf(L"HttpCreateUrlGroup failed with %lu \n", retCode);
-		goto CleanUp;
-	}
 
 	//
 	// Create a request queue handle
 	//
 	HANDLE hReqQueue = nullptr;
-	retCode = HttpCreateRequestQueue(HttpApi::HttpApiVersion,
+	auto retCode = HttpCreateRequestQueue(HttpApi::HttpApiVersion,
 		L"MyQueue",
 		nullptr,
 		0,
@@ -179,7 +183,7 @@ int main(int argc, char* argv[])
 	// Bind the request queue to UrlGroup
 	//
 
-	retCode = HttpSetUrlGroupProperty(urlGroupId,
+	retCode = HttpSetUrlGroupProperty(urlGroupId.Get(),
 		HttpServerBindingProperty,
 		&BindingProperty,
 		sizeof(BindingProperty));
@@ -201,7 +205,7 @@ int main(int argc, char* argv[])
 	CGTimeout.EntityBody = 50; //The timeout is in secs
 
 
-	retCode = HttpSetUrlGroupProperty(urlGroupId,
+	retCode = HttpSetUrlGroupProperty(urlGroupId.Get(),
 		HttpServerTimeoutsProperty,
 		&CGTimeout,
 		sizeof(HTTP_TIMEOUT_LIMIT_INFO));
@@ -217,7 +221,7 @@ int main(int argc, char* argv[])
 		url);
 
 
-	retCode = HttpAddUrlToUrlGroup(urlGroupId,
+	retCode = HttpAddUrlToUrlGroup(urlGroupId.Get(),
 		url,
 		0,
 		0);
@@ -234,36 +238,7 @@ int main(int argc, char* argv[])
 
 CleanUp:
 
-	//
-	// Call HttpRemoveUrl for all the URLs that we added.
-	// HTTP_URL_FLAG_REMOVE_ALL flag allows us to remove
-	// all the URLs registered on URL Group at once
-	//
-	if (!HTTP_IS_NULL_ID(&urlGroupId))
-	{
-		retCode = HttpRemoveUrlFromUrlGroup(urlGroupId,
-			nullptr,
-			HTTP_URL_FLAG_REMOVE_ALL);
 
-		if (retCode != NO_ERROR)
-		{
-			wprintf(L"HttpRemoveUrl failed with %lu \n", retCode);
-		}
-	}
-
-	//
-	// Close the Url Group
-	//
-
-	if (!HTTP_IS_NULL_ID(&urlGroupId))
-	{
-		retCode = HttpCloseUrlGroup(urlGroupId);
-
-		if (retCode != NO_ERROR)
-		{
-			wprintf(L"HttpCloseUrlGroup failed with %lu \n", retCode);
-		}
-	}
 
 	//
 	// Close the Request Queue handle.
