@@ -2,130 +2,6 @@
 #include <strsafe.h>
 #include <winrt/base.h>
 
-
-
-/***************************************************************************++
-Routine Description:
-	The routine to receive a request. This routine calls the corresponding
-	routine to deal with the response.
-Arguments:
-	hReqQueue - Handle to the request queue.
-Return Value:
-	Success/Failure.
---***************************************************************************/
-DWORD RequestQueue::ReceiveRequests(char* wwwAuthValue) const
-{
-	//
-	// Allocate a 2K buffer. Should be good for most requests, we'll grow
-	// this if required. We also need space for a HTTP_REQUEST structure.
-	//
-
-	ULONG bufferSize = sizeof(HTTP_REQUEST);
-	std::vector<CHAR> requestBuffer(bufferSize);
-
-
-	//
-	// Wait for a new request -- This is indicated by a NULL request ID.
-	//
-	HTTP_REQUEST_ID requestId;
-	HTTP_SET_NULL_ID(&requestId);
-
-	DWORD result{};
-	for (;;)
-	{
-		fill(begin(requestBuffer), end(requestBuffer), 0);
-
-		DWORD bytesRead{};
-		auto request = reinterpret_cast<PHTTP_REQUEST>(requestBuffer.data());
-
-		result = HttpReceiveHttpRequest(m_queue.Get(), requestId, 0, request, bufferSize, &bytesRead, nullptr);
-
-		if (NO_ERROR == result)
-		{
-			
-			switch (request->Verb)
-			{
-			case HttpVerbGET:
-				wprintf(L"Got a GET request for %ws \n", request->CookedUrl.pFullUrl);
-
-				if (request->pRequestInfo &&
-					request->pRequestInfo->InfoType == HttpRequestInfoTypeAuth &&
-					static_cast<HTTP_REQUEST_AUTH_INFO*>(request->pRequestInfo->pInfo)->AuthStatus == HttpAuthStatusSuccess)
-				{
-					wprintf(L"Request is authenticated, sending 200\n");
-					result = SendHttpResponse(request, 200, wwwAuthValue, "OK", "Hey! You hit the server \r\n");
-				}
-				else
-				{
-					wprintf(L"Request is not authenticated, sending 401\n");
-					result = SendHttpResponse(request, 401, nullptr, "Unauthorized", "Gimme Negotiate \r\n");
-				}
-
-				break;
-
-			default:
-				wprintf(L"Got a unknown request for %ws \n", request->CookedUrl.pFullUrl);
-
-				result = SendHttpResponse(request, 503, nullptr, "Not Implemented", nullptr);
-				break;
-			}
-
-			if (result != NO_ERROR)
-			{
-				break;
-			}
-
-			//
-			// Reset the Request ID so that we pick up the next request.
-			//
-			HTTP_SET_NULL_ID(&requestId);
-		}
-		else if (result == ERROR_MORE_DATA)
-		{
-			//
-			// The input buffer was too small to hold the request headers
-			// We have to allocate more buffer & call the API again.
-			//
-			// When we call the API again, we want to pick up the request
-			// that just failed. This is done by passing a RequestID.
-			//
-			// This RequestID is picked from the old buffer.
-			//
-			requestId = request->RequestId;
-
-			//
-			// Free the old buffer and allocate a new one.
-			//
-			bufferSize = bytesRead;
-			requestBuffer.resize(bufferSize);
-		}
-		else if (ERROR_CONNECTION_INVALID == result && !HTTP_IS_NULL_ID(&requestId))
-		{
-			// The TCP connection got torn down by the peer when we were
-			// trying to pick up a request with more buffer. We'll just move
-			// onto the next request.
-
-			HTTP_SET_NULL_ID(&requestId);
-		}
-		else
-		{
-			break;
-		}
-	} // for(;;)
-
-
-	return result;
-}
-
-RequestQueue::RequestQueue(RequestQueueHandle queue) : m_queue{ std::move(queue) }
-{
-}
-
-const RequestQueueHandle& RequestQueue::Handle() const
-{
-	return m_queue;
-}
-
 UrlGroup::UrlGroup(UrlGroupHandle urlGroup) : m_urlGroup{ std::move(urlGroup) }
 {
 }
@@ -200,6 +76,20 @@ Session HttpApi::CreateSession() const
 	return session;
 }
 
+HttpApi::~HttpApi()
+{
+	HttpTerminate(HTTP_INITIALIZE_SERVER, nullptr);
+}
+
+RequestQueue::RequestQueue(RequestQueueHandle queue) : m_queue{ std::move(queue) }
+{
+}
+
+const RequestQueueHandle& RequestQueue::Handle() const
+{
+	return m_queue;
+}
+
 RequestQueue HttpApi::CreateRequestQueue(const std::wstring& name) const
 {
 	RequestQueueHandle queue;
@@ -211,9 +101,118 @@ RequestQueue HttpApi::CreateRequestQueue(const std::wstring& name) const
 	return queue;
 }
 
-HttpApi::~HttpApi()
+
+/***************************************************************************++
+Routine Description:
+	The routine to receive a request. This routine calls the corresponding
+	routine to deal with the response.
+Arguments:
+	hReqQueue - Handle to the request queue.
+Return Value:
+	Success/Failure.
+--***************************************************************************/
+DWORD RequestQueue::ReceiveRequests(char* wwwAuthValue) const
 {
-	HttpTerminate(HTTP_INITIALIZE_SERVER, nullptr);
+	//
+	// Allocate a 2K buffer. Should be good for most requests, we'll grow
+	// this if required. We also need space for a HTTP_REQUEST structure.
+	//
+
+	ULONG bufferSize = sizeof(HTTP_REQUEST);
+	std::vector<CHAR> requestBuffer(bufferSize);
+
+
+	//
+	// Wait for a new request -- This is indicated by a NULL request ID.
+	//
+	HTTP_REQUEST_ID requestId;
+	HTTP_SET_NULL_ID(&requestId);
+
+	DWORD result{};
+	for (;;)
+	{
+		fill(begin(requestBuffer), end(requestBuffer), 0);
+
+		DWORD bytesRead{};
+		auto request = reinterpret_cast<PHTTP_REQUEST>(requestBuffer.data());
+
+		result = HttpReceiveHttpRequest(m_queue.Get(), requestId, 0, request, bufferSize, &bytesRead, nullptr);
+
+		if (NO_ERROR == result)
+		{
+
+			switch (request->Verb)
+			{
+			case HttpVerbGET:
+				wprintf(L"Got a GET request for %ws \n", request->CookedUrl.pFullUrl);
+
+				if (request->pRequestInfo &&
+					request->pRequestInfo->InfoType == HttpRequestInfoTypeAuth &&
+					static_cast<HTTP_REQUEST_AUTH_INFO*>(request->pRequestInfo->pInfo)->AuthStatus == HttpAuthStatusSuccess)
+				{
+					wprintf(L"Request is authenticated, sending 200\n");
+					result = SendHttpResponse(request, 200, wwwAuthValue, "OK", "Hey! You hit the server \r\n");
+				}
+				else
+				{
+					wprintf(L"Request is not authenticated, sending 401\n");
+					result = SendHttpResponse(request, 401, nullptr, "Unauthorized", "Gimme Negotiate \r\n");
+				}
+
+				break;
+
+			default:
+				wprintf(L"Got a unknown request for %ws \n", request->CookedUrl.pFullUrl);
+
+				result = SendHttpResponse(request, 503, nullptr, "Not Implemented", nullptr);
+				break;
+			}
+
+			if (result != NO_ERROR)
+			{
+				break;
+			}
+
+			//
+			// Reset the Request ID so that we pick up the next request.
+			//
+			HTTP_SET_NULL_ID(&requestId);
+		}
+		else if (result == ERROR_MORE_DATA)
+		{
+			//
+			// The input buffer was too small to hold the request headers
+			// We have to allocate more buffer & call the API again.
+			//
+			// When we call the API again, we want to pick up the request
+			// that just failed. This is done by passing a RequestID.
+			//
+			// This RequestID is picked from the old buffer.
+			//
+			requestId = request->RequestId;
+
+			//
+			// Free the old buffer and allocate a new one.
+			//
+			bufferSize = bytesRead;
+			requestBuffer.resize(bufferSize);
+		}
+		else if (ERROR_CONNECTION_INVALID == result && !HTTP_IS_NULL_ID(&requestId))
+		{
+			// The TCP connection got torn down by the peer when we were
+			// trying to pick up a request with more buffer. We'll just move
+			// onto the next request.
+
+			HTTP_SET_NULL_ID(&requestId);
+		}
+		else
+		{
+			break;
+		}
+	} // for(;;)
+
+
+	return result;
 }
 
 DWORD RequestQueue::SendHttpResponse(PHTTP_REQUEST request, USHORT statusCode, char* wwwAuthValue, PSTR reasonText, PSTR contentText) const
