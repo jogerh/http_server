@@ -49,7 +49,7 @@ void Session::EnableAuthNegotiation()
 {
 	HTTP_SERVER_AUTHENTICATION_INFO AuthInfo{};
 	AuthInfo.Flags.Present = 1;
-	AuthInfo.AuthSchemes = HTTP_AUTH_ENABLE_NEGOTIATE;
+	AuthInfo.AuthSchemes = HTTP_AUTH_ENABLE_BASIC;
 
 	SetProperty(HttpServerAuthenticationProperty, &AuthInfo);
 }
@@ -222,8 +222,9 @@ DWORD RequestQueue::SendHttpResponse(PHTTP_REQUEST request, USHORT statusCode, c
 	//
 	HttpResponse response(statusCode, reasonText);
 
-	if (statusCode == 401)
-		response.AddHeader(HttpHeaderWwwAuthenticate, "Negotiate");
+	if (statusCode == 401) {
+		response.AddHeader(HttpHeaderWwwAuthenticate, "Basic");
+	}
 
 	if (statusCode == 200 && wwwAuthValue)
 		response.AddHeader(HttpHeaderWwwAuthenticate, wwwAuthValue);
